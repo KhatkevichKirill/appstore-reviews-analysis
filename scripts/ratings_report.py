@@ -95,6 +95,19 @@ def half_unit(decimals: int) -> Decimal:
     return Decimal(5).scaleb(-(decimals + 1))
 
 
+def normalise_average(text: str) -> str:
+    """The average as Apple stores it, so its decimals give the real precision.
+
+    The raw Lookup response prints the double's full binary expansion:
+    4.66287 arrives as 4.6628699999999998482280716416426002979278564453125.
+    Taken literally that is 49 decimals and a bogus error bound of ~0. When the
+    text differs from the double's shortest form it is such an expansion, so use
+    the short form; otherwise keep the text (trailing zeros are real precision).
+    """
+    shortest = repr(float(text))
+    return text if Decimal(text) == Decimal(shortest) else shortest
+
+
 def require_columns(reader: csv.DictReader, required: set[str], what: str) -> None:
     missing = required - set(reader.fieldnames or [])
     if missing:
@@ -110,12 +123,13 @@ def load_snapshots(rows: Iterable[dict]) -> list[Snapshot]:
             print(f"snapshots line {line}: no rating count/average, skipped", file=sys.stderr)
             continue
         try:
-            average = Decimal(average_raw)
+            average_text = normalise_average(average_raw)
+            average = Decimal(average_text)
             count = int(count_raw)
         except (InvalidOperation, ValueError):
             print(f"snapshots line {line}: unparseable rating values, skipped", file=sys.stderr)
             continue
-        decimals = len(average_raw.split(".", 1)[1]) if "." in average_raw else 0
+        decimals = len(average_text.split(".", 1)[1]) if "." in average_text else 0
         snapshots.append(
             Snapshot(
                 at=parse_time(row["snapshot_at"]),

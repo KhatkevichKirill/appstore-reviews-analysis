@@ -138,6 +138,15 @@ console.log(JSON.stringify({ countries, rows }));
         self.assertEqual(us["user_rating_count_current_version"], 812)
         self.assertEqual(rows[1]["user_rating_count_current_version"], "")  # absent field stays empty
 
+    def test_snapshot_chain_shortens_apples_double_expansion(self):
+        # Apple prints the average's full binary expansion (US response, 2026-10-01).
+        raw = ('{"resultCount":1,"results":[{"trackId":1209815023,"version":"5.5.13",'
+               '"userRatingCount":525034,'
+               '"averageUserRating":4.6628699999999998482280716416426002979278564453125}]}')
+        result = self.run_snapshot_chain({"us": raw, "gb": raw, "ca": raw, "au": raw})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["rows"][0]["json"]["average_user_rating"], "4.66287")
+
     def test_snapshot_chain_fails_loudly_when_app_missing(self):
         empty = json.dumps({"resultCount": 0, "results": []})
         result = self.run_snapshot_chain({"us": empty, "gb": empty, "ca": empty, "au": empty})

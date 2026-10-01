@@ -211,6 +211,13 @@ class LoadingTest(unittest.TestCase):
         self.assertEqual((snaps[0].country, snaps[0].count, snaps[0].decimals), ("US", 1234, 5))
         self.assertEqual(snaps[0].at, datetime(2026, 10, 1, 12, 7, tzinfo=UTC))
 
+    def test_raw_lookup_double_expansion_reads_as_five_decimals(self):
+        # Verbatim from the US Lookup response of 2026-10-01.
+        rows = [{"snapshot_at": "2026-10-01T15:00:00Z", "country": "US", "user_rating_count": "525034",
+                 "average_user_rating": "4.6628699999999998482280716416426002979278564453125"}]
+        snap = rr.load_snapshots(rows)[0]
+        self.assertEqual((snap.average, snap.decimals), (Decimal("4.66287"), 5))
+
     def test_review_dates_with_offsets_normalised_to_utc(self):
         rows = [{"date": "2026-09-29T17:42:23-07:00", "country": "US", "score": "1"}]
         self.assertEqual(rr.load_reviews(rows)[0].at, datetime(2026, 9, 30, 0, 42, 23, tzinfo=UTC))

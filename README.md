@@ -125,9 +125,30 @@ Flags:
 `userRatingCount`, and it inherits the review feed's lag and the `maxItems` cap
 described above.
 
+## First live snapshot (2026-10-01, manual)
+
+| storefront | `userRatingCount` | `averageUserRating` | worst-case error of a period's mean★ |
+|---|---:|---:|---|
+| US | 525,034 | 4.66287 | ±5.25 / new ratings |
+| GB | 42,152 | 4.56911 | ±0.42 / new ratings |
+| CA | 42,905 | 4.54502 | ±0.43 / new ratings |
+| AU | 18,428 | 4.52860 | ±0.18 / new ratings |
+
+What it settled:
+
+- **Precision is 5 decimals.** Apple prints the double's full binary expansion
+  (`4.6628699999999998482…`), but the value behind it is `4.66287`. The n8n Code node
+  and `ratings_report.py` both reduce it to that form. Read literally, it would look like
+  49 decimals and the error bound would come out as zero, which is false precision.
+- With 5 decimals, GB/CA/AU give a usable daily mean★ even at ~20 new ratings a day.
+  The US needs ~50/day for ±0.1★ (its lifetime average is ~150/day, but the current rate
+  is unknown until there are two snapshots). Weekly periods are 7× tighter.
+- `*ForCurrentVersion` fields equal the all-time ones, even though 5.5.13 shipped
+  the day before. They just mirror the totals, so per-version numbers aren't available
+  here. The equality also shows that no summary-rating reset happened on that release.
+
 ## Still to verify (AICP-172)
 
-- Decimal precision and update cadence of the Lookup numbers (`--diagnose` after a few
-  days of snapshots).
+- Update cadence of the Lookup numbers (`--diagnose` after a few days of snapshots).
 - Whether a summary-rating reset on a version release affects `userRatingCount`.
 - One period cross-checked against App Store Connect.
