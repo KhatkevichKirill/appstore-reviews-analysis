@@ -1,0 +1,6 @@
+# Exported sheet data stays local: this repo is public.
+*.csv
+data/
+
+__pycache__/
+*.pyc

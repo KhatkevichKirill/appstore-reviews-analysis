@@ -1,0 +1,161 @@
+{
+  "name": "App Store ratings → Sheet (hourly snapshot)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1,
+              "triggerAtMinute": 7
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -480,
+        0
+      ],
+      "id": "5b0f3c1e-7a51-4b8e-9a43-2f1d6c0e8a01",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per storefront. Keep this list in sync with the reviews workflow.\nconst APP_ID = '1209815023';\nconst COUNTRIES = ['us', 'gb', 'ca', 'au'];\n\n// One timestamp for the whole run, so a run's rows group together.\nconst snapshotAt = new Date().toISOString();\n\nreturn COUNTRIES.map((country) => ({ json: { appId: APP_ID, country, snapshotAt } }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        0
+      ],
+      "id": "8c2d4e6f-1b3a-4c5d-8e7f-9a0b1c2d3e02",
+      "name": "Countries"
+    },
+    {
+      "parameters": {
+        "url": "=https://itunes.apple.com/lookup?id={{ $json.appId }}&country={{ $json.country }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "2e4f6a8b-3c5d-4e6f-8a9b-0c1d2e3f4a03",
+      "name": "iTunes Lookup",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Apple serves this endpoint as text/javascript, so the HTTP node returns raw text\n// and we parse it here.\nconst req = $('Countries').item.json;\n\nlet body;\ntry {\n  body = JSON.parse($json.data);\n} catch (e) {\n  throw new Error(`iTunes lookup ${req.country}: response is not JSON`);\n}\n\nconst app = (body.results || []).find((r) => String(r.trackId) === req.appId);\nif (!app) {\n  throw new Error(`iTunes lookup ${req.country}: app ${req.appId} missing (resultCount=${body.resultCount})`);\n}\n\nconst text = (v) => (v === undefined || v === null ? '' : String(v));\nconst int = (v) => (Number.isInteger(v) ? v : '');\n\n// Averages are written as text: the report derives the mean of NEW ratings from\n// them, so every decimal Apple returns has to survive Sheets formatting.\nreturn {\n  json: {\n    snapshot_at: req.snapshotAt,\n    country: req.country.toUpperCase(),\n    app_id: req.appId,\n    app_version: text(app.version),\n    current_version_release_date: text(app.currentVersionReleaseDate),\n    user_rating_count: int(app.userRatingCount),\n    average_user_rating: text(app.averageUserRating),\n    user_rating_count_current_version: int(app.userRatingCountForCurrentVersion),\n    average_user_rating_current_version: text(app.averageUserRatingForCurrentVersion),\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "4a6b8c0d-5e7f-4a1b-9c2d-3e4f5a6b7c04",
+      "name": "Extract ratings"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_REVIEWS_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ratings_snapshots",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        480,
+        0
+      ],
+      "id": "6c8d0e2f-7a9b-4c3d-8e4f-5a6b7c8d9e05",
+      "name": "Append snapshot rows"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Countries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Countries": {
+      "main": [
+        [
+          {
+            "node": "iTunes Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "iTunes Lookup": {
+      "main": [
+        [
+          {
+            "node": "Extract ratings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract ratings": {
+      "main": [
+        [
+          {
+            "node": "Append snapshot rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
