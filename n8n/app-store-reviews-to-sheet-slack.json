@@ -24,7 +24,7 @@
     },
     {
       "parameters": {
-        "jsCode": "function escMrkdwn(s) {\n  if (s == null) return '';\n  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n}\n\nfunction oneLine(s, max) {\n  const t = String(s || '').replace(/\\s+/g, ' ').trim();\n  if (!t) return '';\n  return t.length > max ? t.slice(0, max - 1) + '…' : t;\n}\n\nconst APP_HEAD = 'App Store · *Speechify* — Text to Speech';\n\nreturn $input.all().map((item) => {\n  const j = item.json || {};\n  const score = Math.min(5, Math.max(0, Math.round(Number(j.score) || 0)));\n  const stars = '★'.repeat(score) + '☆'.repeat(5 - score);\n  const country = (String(j.country || '').toUpperCase() || '—');\n  const title = oneLine(j.title, 140) || '(No title)';\n  const bodyRaw = String(j.text || '').trim();\n  const bodyPlain = bodyRaw.length > 2800 ? bodyRaw.slice(0, 2799) + '…' : bodyRaw;\n  const user = oneLine(j.userName, 100) || 'Anonymous';\n  const ver = j.version != null && j.version !== '' ? String(j.version) : '—';\n  const when = j.date ? String(j.date) : '—';\n\n  const headline = `${APP_HEAD}   ${stars}   *${escMrkdwn(country)}*`;\n  const titleBlock = `*${escMrkdwn(title)}*`;\n\n  const fallback = [\n    'App Store · Speechify — Text to Speech  ' + stars + '  ' + country,\n    title,\n    bodyPlain,\n    `by ${user} for v${ver} – ${when} · ${country}`,\n    j.url ? String(j.url) : '',\n  ].filter(Boolean).join('\\n\\n');\n\n  const blocks = [\n    { type: 'divider' },\n    { type: 'section', text: { type: 'mrkdwn', text: headline } },\n    { type: 'section', text: { type: 'mrkdwn', text: titleBlock } },\n  ];\n\n  if (bodyPlain) {\n    blocks.push({\n      type: 'section',\n      text: { type: 'plain_text', text: bodyPlain, emoji: true },\n    });\n  }\n\n  blocks.push({\n    type: 'context',\n    elements: [\n      {\n        type: 'mrkdwn',\n        text: escMrkdwn(`by ${user} for v${ver} – ${when} · ${country}`),\n      },\n    ],\n  });\n\n  if (j.url) {\n    blocks.push({\n      type: 'actions',\n      elements: [\n        {\n          type: 'button',\n          text: { type: 'plain_text', text: 'Open in App Store', emoji: true },\n          url: 'https://apps.apple.com/us/app/speechify-text-to-speech-pdf/id1209815023?see-all=reviews',\n          action_id: 'open_appstore_review',\n        },\n      ],\n    });\n  }\n\n  return { json: { slackBody: { text: fallback, blocks } } };\n});"
+        "jsCode": "function escMrkdwn(s) {\n  if (s == null) return '';\n  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n}\n\nfunction oneLine(s, max) {\n  const t = String(s || '').replace(/\\s+/g, ' ').trim();\n  if (!t) return '';\n  return t.length > max ? t.slice(0, max - 1) + '…' : t;\n}\n\nconst APP_HEAD = 'App Store · *Speechify* — Text to Speech';\n\nreturn $input.all().map((item) => {\n  const j = item.json || {};\n  const score = Math.min(5, Math.max(0, Math.round(Number(j.score) || 0)));\n  const stars = '★'.repeat(score) + '☆'.repeat(5 - score);\n  const country = (String(j.country || '').toUpperCase() || '—');\n  const storefront = /^[A-Z]{2}$/.test(country) ? country.toLowerCase() : 'us';\n  const title = oneLine(j.title, 140) || '(No title)';\n  const bodyRaw = String(j.text || '').trim();\n  const bodyPlain = bodyRaw.length > 2800 ? bodyRaw.slice(0, 2799) + '…' : bodyRaw;\n  const user = oneLine(j.userName, 100) || 'Anonymous';\n  const ver = j.version != null && j.version !== '' ? String(j.version) : '—';\n  const when = j.date ? String(j.date) : '—';\n\n  const headline = `${APP_HEAD}   ${stars}   *${escMrkdwn(country)}*`;\n  const titleBlock = `*${escMrkdwn(title)}*`;\n\n  const fallback = [\n    'App Store · Speechify — Text to Speech  ' + stars + '  ' + country,\n    title,\n    bodyPlain,\n    `by ${user} for v${ver} – ${when} · ${country}`,\n    j.url ? String(j.url) : '',\n  ].filter(Boolean).join('\\n\\n');\n\n  const blocks = [\n    { type: 'divider' },\n    { type: 'section', text: { type: 'mrkdwn', text: headline } },\n    { type: 'section', text: { type: 'mrkdwn', text: titleBlock } },\n  ];\n\n  if (bodyPlain) {\n    blocks.push({\n      type: 'section',\n      text: { type: 'plain_text', text: bodyPlain, emoji: true },\n    });\n  }\n\n  blocks.push({\n    type: 'context',\n    elements: [\n      {\n        type: 'mrkdwn',\n        text: escMrkdwn(`by ${user} for v${ver} – ${when} · ${country}`),\n      },\n    ],\n  });\n\n  if (j.url) {\n    blocks.push({\n      type: 'actions',\n      elements: [\n        {\n          type: 'button',\n          text: { type: 'plain_text', text: 'Open in App Store', emoji: true },\n          url: `https://apps.apple.com/${storefront}/app/id1209815023?see-all=reviews`,\n          action_id: 'open_appstore_review',\n        },\n      ],\n    });\n  }\n\n  return { json: { slackBody: { text: fallback, blocks } } };\n});"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -218,7 +218,7 @@
           "cachedResultName": "🐺 App Store Reviews Scraper API | $0.10/1K Reviews (thewolves/appstore-reviews-scraper)",
           "cachedResultUrl": "https://console.apify.com/actors/4qRgh5vXXsv0bKa1l/input"
         },
-        "customBody": "{\n    \"customMapFunction\": \"(object) => { return {...object} }\",\n    \"maxItems\": 5,\n    \"startUrls\": [\n        \"https://apps.apple.com/us/app/speechify-text-to-speech/id1209815023\"\n    ]\n}"
+        "customBody": "{\n    \"customMapFunction\": \"(object) => { return {...object} }\",\n    \"maxItems\": 10,\n    \"startUrls\": [\n        \"https://apps.apple.com/us/app/speechify-text-to-speech/id1209815023\"\n    ]\n}"
       },
       "type": "@apify/n8n-nodes-apify.apify",
       "typeVersion": 1,
@@ -239,7 +239,7 @@
           "cachedResultName": "🐺 App Store Reviews Scraper API | $0.10/1K Reviews (thewolves/appstore-reviews-scraper)",
           "cachedResultUrl": "https://console.apify.com/actors/4qRgh5vXXsv0bKa1l/input"
         },
-        "customBody": "{\n    \"customMapFunction\": \"(object) => { return {...object} }\",\n    \"maxItems\": 5,\n    \"startUrls\": [\n        \"https://apps.apple.com/gb/app/speechify-text-to-speech/id1209815023\"\n    ]\n}"
+        "customBody": "{\n    \"customMapFunction\": \"(object) => { return {...object} }\",\n    \"maxItems\": 10,\n    \"startUrls\": [\n        \"https://apps.apple.com/gb/app/speechify-text-to-speech/id1209815023\"\n    ]\n}"
       },
       "type": "@apify/n8n-nodes-apify.apify",
       "typeVersion": 1,
@@ -260,7 +260,7 @@
           "cachedResultName": "🐺 App Store Reviews Scraper API | $0.10/1K Reviews (thewolves/appstore-reviews-scraper)",
           "cachedResultUrl": "https://console.apify.com/actors/4qRgh5vXXsv0bKa1l/input"
         },
-        "customBody": "{\n    \"customMapFunction\": \"(object) => { return {...object} }\",\n    \"maxItems\": 5,\n    \"startUrls\": [\n        \"https://apps.apple.com/ca/app/speechify-text-to-speech/id1209815023\"\n    ]\n}"
+        "customBody": "{\n    \"customMapFunction\": \"(object) => { return {...object} }\",\n    \"maxItems\": 10,\n    \"startUrls\": [\n        \"https://apps.apple.com/ca/app/speechify-text-to-speech/id1209815023\"\n    ]\n}"
       },
       "type": "@apify/n8n-nodes-apify.apify",
       "typeVersion": 1,
@@ -281,7 +281,7 @@
           "cachedResultName": "🐺 App Store Reviews Scraper API | $0.10/1K Reviews (thewolves/appstore-reviews-scraper)",
           "cachedResultUrl": "https://console.apify.com/actors/4qRgh5vXXsv0bKa1l/input"
         },
-        "customBody": "{\n    \"customMapFunction\": \"(object) => { return {...object} }\",\n    \"maxItems\": 5,\n    \"startUrls\": [\n        \"https://apps.apple.com/au/app/speechify-text-to-speech/id1209815023\"\n    ]\n}"
+        "customBody": "{\n    \"customMapFunction\": \"(object) => { return {...object} }\",\n    \"maxItems\": 10,\n    \"startUrls\": [\n        \"https://apps.apple.com/au/app/speechify-text-to-speech/id1209815023\"\n    ]\n}"
       },
       "type": "@apify/n8n-nodes-apify.apify",
       "typeVersion": 1,

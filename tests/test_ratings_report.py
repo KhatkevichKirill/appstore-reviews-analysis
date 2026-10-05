@@ -141,22 +141,28 @@ class PeriodTest(unittest.TestCase):
 
 
 class FlagsAndCombineTest(unittest.TestCase):
-    def test_count_decrease_flagged_and_blocks_total(self):
+    def test_persistent_drop_flagged_once_it_outlives_the_window(self):
+        # A summary-rating reset: 1000 ratings, then a fresh count from 40 that stays.
         stats = rr.compute(
             [
                 snap(datetime(2026, 10, 1, 23, 0, tzinfo=UTC), 1000, "4.50000", "US"),
                 snap(datetime(2026, 10, 2, 23, 0, tzinfo=UTC), 40, "3.10000", "US", version="5.6.0"),
+                snap(datetime(2026, 10, 3, 23, 0, tzinfo=UTC), 41, "3.10000", "US", version="5.6.0"),
                 snap(datetime(2026, 10, 1, 23, 0, tzinfo=UTC), 500, "4.60000", "GB"),
                 snap(datetime(2026, 10, 2, 23, 0, tzinfo=UTC), 505, "4.59000", "GB"),
+                snap(datetime(2026, 10, 3, 23, 0, tzinfo=UTC), 506, "4.59000", "GB"),
             ],
             [],
         )
         days = by_key(stats)
-        us = days[("2026-10-02", "US")]
+        # Within the 48 h window the drop looks like a stale cache answer: no change.
+        self.assertEqual(days[("2026-10-02", "US")].new_ratings, 0)
+        # Once the old count falls out of the window, the drop is real and flagged.
+        us = days[("2026-10-03", "US")]
         self.assertIn("count_decreased", us.flags)
         self.assertIn("version_changed", us.flags)
         self.assertIsNone(us.new_average)
-        total = days[("2026-10-02", rr.ALL)]
+        total = days[("2026-10-03", rr.ALL)]
         self.assertIsNone(total.new_ratings)
         self.assertIsNone(total.star_only_estimate)
         self.assertIn("count_decreased", total.flags)
@@ -178,6 +184,20 @@ class FlagsAndCombineTest(unittest.TestCase):
         expected = Decimal(100 * 1 + 10 * 5) / 110
         self.assertLessEqual(abs(total.new_average - expected), total.new_average_error)
 
+    def test_partial_first_period_counts_reviews_only_from_first_snapshot(self):
+        snaps = [
+            snap(datetime(2026, 10, 1, 16, 37, tzinfo=UTC), 1000, "4.50000"),
+            snap(datetime(2026, 10, 1, 23, 7, tzinfo=UTC), 1005, "4.49000"),
+            snap(datetime(2026, 10, 2, 0, 7, tzinfo=UTC), 1006, "4.49000"),
+        ]
+        reviews = [
+            rr.Review(datetime(2026, 10, 1, 9, tzinfo=UTC), "US", 1),  # before collection started
+            rr.Review(datetime(2026, 10, 1, 18, tzinfo=UTC), "US", 1),
+        ]
+        day = by_key(rr.compute(snaps, reviews))[("2026-10-01", "US")]
+        self.assertIn("partial", day.flags)
+        self.assertEqual(day.reviews, 1)
+
     def test_reviews_bucketed_by_period_country_and_star(self):
         snaps = [
             snap(datetime(2026, 10, 1, 23, 0, tzinfo=UTC), 1000, "4.50000"),
@@ -195,7 +215,41 @@ class FlagsAndCombineTest(unittest.TestCase):
         self.assertEqual(day.star_only_estimate, 20 - 3)
 
 
+class StaleCacheTest(unittest.TestCase):
+    def test_stale_answers_neither_subtract_nor_double_count(self):
+        # True count +10/day; every other hourly answer is a cache a day behind.
+        start = datetime(2026, 10, 1, 0, 7, tzinfo=UTC)
+        snaps = []
+        for h in range(72):
+            true = 1000 + 10 * ((h + 1) // 24)  # Apple updates once a day
+            stale = 1000 + 10 * max(0, (h + 1) // 24 - 1)
+            snaps.append(snap(start + timedelta(hours=h), stale if h % 2 else true, "4.50000"))
+        days = by_key(rr.compute(snaps, []))
+        self.assertEqual(days[("2026-10-02", "US")].new_ratings, 10)
+        self.assertNotIn("count_decreased", days[("2026-10-02", "US")].flags)
+        self.assertEqual(days[("2026-10-03", "US")].new_ratings, 10)
+
+    def test_value_at_prefers_highest_recent_count(self):
+        t0 = datetime(2026, 10, 1, tzinfo=UTC)
+        snaps = [snap(t0, 1000, "4.5"), snap(t0 + timedelta(hours=1), 1010, "4.4"),
+                 snap(t0 + timedelta(hours=2), 1000, "4.5")]
+        times = [s.at for s in snaps]
+        self.assertEqual(rr.value_at(snaps, times, t0 + timedelta(hours=2), rr.DEFAULT_WINDOW).count, 1010)
+        far = t0 + timedelta(hours=60)  # nothing in the window: fall back to the last answer
+        self.assertEqual(rr.value_at(snaps, times, far, rr.DEFAULT_WINDOW).count, 1000)
+        self.assertIsNone(rr.value_at(snaps, times, t0 - timedelta(hours=1), rr.DEFAULT_WINDOW))
+
+
 class LoadingTest(unittest.TestCase):
+    def test_spreadsheet_float_counts_accepted(self):
+        rows = [{"snapshot_at": "2026-10-01T16:37:18.794Z", "country": "US",
+                 "user_rating_count": "525034.0", "average_user_rating": "4.66287"},
+                {"snapshot_at": "2026-10-01T17:07:00Z", "country": "US",
+                 "user_rating_count": "525034.5", "average_user_rating": "4.66287"}]
+        with contextlib.redirect_stderr(io.StringIO()):
+            snaps = rr.load_snapshots(rows)
+        self.assertEqual([s.count for s in snaps], [525034])
+
     def test_trailing_zero_decimals_kept_and_bad_rows_skipped(self):
         rows = [
             {"snapshot_at": "2026-10-01T12:07:00.000Z", "country": "us", "user_rating_count": "1,234",
@@ -266,7 +320,8 @@ class CliTest(unittest.TestCase):
         self.assertIn("US: 72 snapshots", out)
         self.assertIn("average decimals seen: max 5", out)
         self.assertIn("longest gap between snapshots: 1.0 h", out)
-        self.assertIn("count changed 11 times; hours between changes: median 6.0", out)
+        self.assertIn("stale answers: 0/72", out)
+        self.assertIn("freshest count rose 11 times; hours between rises: median 6.0", out)
 
     def test_missing_column_is_a_clear_error(self):
         bad = os.path.join(self.dir.name, "bad.csv")

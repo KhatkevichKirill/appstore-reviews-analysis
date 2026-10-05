@@ -35,6 +35,9 @@ from typing import Iterable, Sequence
 from zoneinfo import ZoneInfo
 
 ALL = "ALL"
+# Stale cache answers seen on 2026-10-01..05 were up to ~27 h old; 48 h keeps at
+# least one fresh answer in every window while still letting a reset show within 2 days.
+DEFAULT_WINDOW = timedelta(hours=48)
 SNAPSHOT_COLUMNS = {"snapshot_at", "country", "user_rating_count", "average_user_rating"}
 REVIEW_COLUMNS = {"date", "country", "score"}
 
@@ -68,6 +71,9 @@ class PeriodStats:
     new_average_error: Decimal | None = None
     reviews_by_star: list[int] = field(default_factory=lambda: [0] * 5)
     flags: list[str] = field(default_factory=list)
+    # Start of rating coverage: the period start, or the first snapshot in a partial
+    # first period. Reviews are counted from here so both sides cover the same span.
+    covered_from: datetime | None = None
     # Kept so the ALL row can be combined exactly rather than averaged.
     weighted_delta: Decimal | None = None  # N2*A2 - N1*A1
     error_numerator: Decimal | None = None  # e * (N1 + N2)
@@ -125,7 +131,10 @@ def load_snapshots(rows: Iterable[dict]) -> list[Snapshot]:
         try:
             average_text = normalise_average(average_raw)
             average = Decimal(average_text)
-            count = int(count_raw)
+            count_dec = Decimal(count_raw)  # spreadsheet exports may write 525034 as "525034.0"
+            if count_dec != count_dec.to_integral_value():
+                raise ValueError(count_raw)
+            count = int(count_dec)
         except (InvalidOperation, ValueError):
             print(f"snapshots line {line}: unparseable rating values, skipped", file=sys.stderr)
             continue
@@ -177,26 +186,47 @@ def period_bounds(first: datetime, last: datetime, period: str, tz: ZoneInfo) ->
     return bounds
 
 
+def value_at(
+    snaps: Sequence[Snapshot], times: Sequence[datetime], t: datetime, window: timedelta
+) -> Snapshot | None:
+    """The freshest known value at t: the highest count seen in (t - window, t].
+
+    Apple's edge caches serve stale aggregates (up to ~a day old) for about a
+    third of requests, so the latest snapshot alone flaps down and back up.
+    Counts only grow, so the highest recent one is the freshest. The window
+    lets a genuine drop (a summary-rating reset) take over once it persists.
+    """
+    hi = bisect_right(times, t)
+    if hi == 0:
+        return None
+    lo = bisect_right(times, t - window)
+    if lo >= hi:
+        return snaps[hi - 1]
+    return max(snaps[lo:hi], key=lambda s: (s.count, s.at))
+
+
 def _country_stats(
     snaps: Sequence[Snapshot],
     times: Sequence[datetime],
     start: datetime,
     end: datetime,
     error_per_rating: Decimal,
+    window: timedelta,
 ) -> PeriodStats:
-    stats = PeriodStats(start=start, country=snaps[0].country)
+    stats = PeriodStats(start=start, country=snaps[0].country, covered_from=start)
 
-    i = bisect_right(times, start)
-    base = snaps[i - 1] if i else None
+    base = value_at(snaps, times, start, window)
     if base is None:
         j = bisect_left(times, start)
         base = snaps[j] if j < len(snaps) and snaps[j].at < end else None
         stats.flags.append("partial")
-    i = bisect_right(times, end)
-    last = snaps[i - 1] if i else None
+        if base is not None:
+            stats.covered_from = base.at
+    last = value_at(snaps, times, end, window)
     if end > snaps[-1].at and "partial" not in stats.flags:
         stats.flags.append("partial")
-    if base is None or last is None or last.at <= base.at:
+    in_period = bisect_right(times, end) > bisect_right(times, start)
+    if base is None or last is None or not in_period:
         stats.flags.append("no_data")
         return stats
 
@@ -249,6 +279,7 @@ def compute(
     reviews: Sequence[Review],
     period: str = "day",
     tz: ZoneInfo | None = None,
+    window: timedelta = DEFAULT_WINDOW,
 ) -> list[PeriodStats]:
     tz = tz or ZoneInfo("UTC")
     if not snapshots:
@@ -270,9 +301,11 @@ def compute(
     for start, end in period_bounds(first, last, period, tz):
         rows = []
         for country in sorted(by_country):
-            stats = _country_stats(by_country[country], times[country], start, end, error_per_rating[country])
+            stats = _country_stats(
+                by_country[country], times[country], start, end, error_per_rating[country], window
+            )
             for r in reviews:
-                if r.country == country and start <= r.at < end:
+                if r.country == country and stats.covered_from <= r.at < end:
                     stats.reviews_by_star[r.score - 1] += 1
             rows.append(stats)
         results.extend(rows)
@@ -281,8 +314,8 @@ def compute(
     return results
 
 
-def diagnose(snapshots: Sequence[Snapshot]) -> list[str]:
-    """How often Apple's numbers actually move, and how precise they are."""
+def diagnose(snapshots: Sequence[Snapshot], window: timedelta = DEFAULT_WINDOW) -> list[str]:
+    """How often Apple's numbers actually move, how stale answers get, and how precise they are."""
     lines = []
     by_country: dict[str, list[Snapshot]] = {}
     for s in snapshots:
@@ -295,19 +328,38 @@ def diagnose(snapshots: Sequence[Snapshot]) -> list[str]:
             gap = max((b.at - a.at).total_seconds() / 3600 for a, b in zip(snaps, snaps[1:]))
             lines.append(f"  longest gap between snapshots: {gap:.1f} h")
 
-        changes = [b for a, b in zip(snaps, snaps[1:]) if b.count != a.count]
-        if len(changes) >= 2:
-            gaps = [(b.at - a.at).total_seconds() / 3600 for a, b in zip(changes, changes[1:])]
+        lines.append(f"  distinct counts: {len({s.count for s in snaps})}")
+
+        # A stale answer is a count below one already seen: an edge cache behind the others.
+        first_seen: dict[int, datetime] = {}
+        high, stale_ages = 0, []
+        for s in snaps:
+            first_seen.setdefault(s.count, s.at)
+            if s.count < high:
+                stale_ages.append((s.at - first_seen[s.count]).total_seconds() / 3600)
+            high = max(high, s.count)
+        line = f"  stale answers: {len(stale_ages)}/{len(snaps)}"
+        if stale_ages:
+            line += f" (oldest value served again {max(stale_ages):.0f} h after it first appeared)"
+        lines.append(line)
+
+        # The update cadence is how often the freshest value moves, not the raw flapping.
+        times = [s.at for s in snaps]
+        fresh = [value_at(snaps, times, s.at, window) for s in snaps]
+        rises = [b.at for a, b in zip(fresh, fresh[1:]) if b.count > a.count]
+        drops = [(a, b) for a, b in zip(fresh, fresh[1:]) if b.count < a.count]
+        if len(rises) >= 2:
+            gaps = [(b - a).total_seconds() / 3600 for a, b in zip(rises, rises[1:])]
             lines.append(
-                f"  count changed {len(changes)} times; hours between changes: "
+                f"  freshest count rose {len(rises)} times; hours between rises: "
                 f"median {median(gaps):.1f}, min {min(gaps):.1f}, max {max(gaps):.1f}"
             )
         else:
-            lines.append(f"  count changed {len(changes)} times")
+            lines.append(f"  freshest count rose {len(rises)} times")
+        for a, b in drops:
+            lines.append(f"  FRESHEST COUNT DROPPED {a.count} -> {b.count} at {b.at:%Y-%m-%d %H:%M} UTC (reset?)")
 
         for a, b in zip(snaps, snaps[1:]):
-            if b.count < a.count:
-                lines.append(f"  DECREASE {a.count} -> {b.count} at {b.at:%Y-%m-%d %H:%M} UTC")
             if b.version != a.version:
                 lines.append(f"  version {a.version or '?'} -> {b.version or '?'} at {b.at:%Y-%m-%d %H:%M} UTC")
 
@@ -378,6 +430,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--tz", default="UTC", help="IANA zone for period boundaries, e.g. America/Sao_Paulo")
     parser.add_argument("--format", choices=["table", "csv"], default="table")
     parser.add_argument("--diagnose", action="store_true", help="report update cadence and precision instead")
+    parser.add_argument("--window-hours", type=float, default=DEFAULT_WINDOW.total_seconds() / 3600,
+                        help="look-back for the freshest value (default: %(default)s)")
     args = parser.parse_args(argv)
 
     with open(args.snapshots, newline="", encoding="utf-8") as f:
@@ -388,8 +442,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("no usable snapshots", file=sys.stderr)
         return 1
 
+    window = timedelta(hours=args.window_hours)
     if args.diagnose:
-        print("\n".join(diagnose(snapshots)))
+        print("\n".join(diagnose(snapshots, window)))
         return 0
 
     reviews: list[Review] = []
@@ -399,7 +454,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             require_columns(reader, REVIEW_COLUMNS, args.reviews)
             reviews = load_reviews(reader)
 
-    stats = compute(snapshots, reviews, args.period, ZoneInfo(args.tz))
+    stats = compute(snapshots, reviews, args.period, ZoneInfo(args.tz), window)
     if args.format == "csv":
         writer = csv.writer(sys.stdout)
         writer.writerow(COLUMNS)

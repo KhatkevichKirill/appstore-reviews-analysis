@@ -1,0 +1,169 @@
+{
+  "name": "App Store ratings → Slack (weekly report)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 12,
+              "triggerAtMinute": 17
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -480,
+        0
+      ],
+      "id": "7d1e3f5a-2b4c-4d6e-8f0a-1b2c3d4e5f11",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_REVIEWS_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "ratings_snapshots",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -240,
+        0
+      ],
+      "id": "8e2f4a6b-3c5d-4e7f-9a1b-2c3d4e5f6a12",
+      "name": "Read snapshots",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_REVIEWS_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        0,
+        0
+      ],
+      "id": "9f3a5b7c-4d6e-4f8a-8b2c-3d4e5f6a7b13",
+      "name": "Read reviews",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Weekly App Store ratings report: one Slack message for the last full week (Mon-Sun, UTC).\n// Ratings come from the hourly `ratings_snapshots` rows, written reviews from the review sheet.\n// Same logic as scripts/ratings_report.py; the README explains the maths.\nconst COUNTRIES = ['US', 'GB', 'CA', 'AU'];\nconst DAY = 24 * 3600 * 1000;\n// About a third of Lookup answers come from a stale edge cache (up to ~a day old), so\n// the value at a moment is the highest count seen in the 48 h before it.\nconst WINDOW = 2 * DAY;\nconst MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];\n\nlet now = new Date();\ntry {\n  const ts = $('Schedule Trigger').first().json.timestamp;\n  if (ts) now = new Date(ts);\n} catch (e) {\n  // Run without the trigger (e.g. a single node test): use the current time.\n}\n\nconst today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());\nconst weekEnd = today - ((new Date(today).getUTCDay() + 6) % 7) * DAY; // this Monday 00:00 UTC\nconst weekStart = weekEnd - 7 * DAY;\nconst prevStart = weekStart - 7 * DAY;\n\nconst num = (v) => Number(String(v ?? '').replace(/,/g, ''));\n// Shortest form of the double: Apple's raw answer prints 4.66287 as 4.66286999999...\nconst decimals = (v) => {\n  const s = String(parseFloat(v));\n  return s.includes('.') ? s.split('.')[1].length : 0;\n};\nconst parseDate = (v) => {\n  if (typeof v === 'number') return Math.round((v - 25569) * DAY); // Sheets serial date\n  const t = Date.parse(String(v ?? ''));\n  return Number.isNaN(t) ? null : t;\n};\n\nconst snaps = {};\nfor (const { json: r } of $('Read snapshots').all()) {\n  const at = Date.parse(r.snapshot_at);\n  const count = num(r.user_rating_count);\n  const avgText = String(r.average_user_rating ?? '').trim();\n  const avg = parseFloat(avgText);\n  const country = String(r.country ?? '').toUpperCase();\n  if (Number.isNaN(at) || !Number.isInteger(count) || Number.isNaN(avg) || !country) continue;\n  (snaps[country] ||= []).push({ at, count, avg, d: decimals(avgText) });\n}\nfor (const list of Object.values(snaps)) list.sort((a, b) => a.at - b.at);\n\nconst reviews = [];\nfor (const { json: r } of $('Read reviews').all()) {\n  const at = parseDate(r.date);\n  const score = Math.round(num(r.score));\n  if (at === null || !(score >= 1 && score <= 5)) continue;\n  reviews.push({ at, score, country: String(r.country ?? '').toUpperCase() });\n}\n\nfunction valueAt(list, t) {\n  let best = null;\n  let last = null;\n  for (const s of list) {\n    if (s.at > t) break;\n    last = s;\n    if (s.at > t - WINDOW && (!best || s.count >= best.count)) best = s;\n  }\n  return best || last;\n}\n\nfunction ratingStats(list, start, end) {\n  const out = { coveredFrom: start, partial: false };\n  let base = valueAt(list, start);\n  if (!base) {\n    base = list.find((s) => s.at >= start && s.at < end) || null;\n    out.partial = true;\n    if (base) out.coveredFrom = base.at;\n  }\n  const last = valueAt(list, end);\n  if (end > list[list.length - 1].at) out.partial = true;\n  if (!base || !last || !list.some((s) => s.at > start && s.at <= end)) {\n    out.noData = true;\n    return out;\n  }\n  out.newRatings = last.count - base.count;\n  out.avgEnd = last.avg;\n  if (out.newRatings < 0) {\n    out.reset = true; // a summary-rating reset or removed ratings\n    return out;\n  }\n  // Integer arithmetic in units of the average's last decimal, so N*A is exact.\n  const scale = 10 ** list.reduce((m, s) => Math.max(m, s.d), 0);\n  const a1 = Math.round(base.avg * scale);\n  const a2 = Math.round(last.avg * scale);\n  out.weighted = (last.count * a2 - base.count * a1) / scale; // N2*A2 - N1*A1\n  out.errNum = (0.5 * (base.count + last.count)) / scale;\n  if (out.newRatings > 0) {\n    out.mean = out.weighted / out.newRatings;\n    out.err = out.errNum / out.newRatings;\n    out.inconsistent = out.mean < 1 - out.err || out.mean > 5 + out.err;\n  }\n  return out;\n}\n\nfunction reviewStats(country, from, end) {\n  const rs = reviews.filter((r) => r.country === country && r.at >= from && r.at < end);\n  return { n: rs.length, sum: rs.reduce((s, r) => s + r.score, 0) };\n}\n\nfunction week(start, end) {\n  const rows = COUNTRIES.map((country) => {\n    const list = snaps[country] || [];\n    const r = list.length ? ratingStats(list, start, end) : { coveredFrom: start, noData: true };\n    return { country, ...r, reviews: reviewStats(country, r.coveredFrom, end) };\n  });\n  const total = {\n    country: 'All',\n    partial: rows.some((r) => r.partial),\n    reviews: rows.reduce((t, r) => ({ n: t.n + r.reviews.n, sum: t.sum + r.reviews.sum }), { n: 0, sum: 0 }),\n  };\n  if (rows.every((r) => r.weighted !== undefined)) {\n    total.newRatings = rows.reduce((s, r) => s + r.newRatings, 0);\n    if (total.newRatings > 0) {\n      total.mean = rows.reduce((s, r) => s + r.weighted, 0) / total.newRatings;\n      total.err = rows.reduce((s, r) => s + r.errNum, 0) / total.newRatings;\n    }\n  } else {\n    total.noData = true;\n  }\n  return [...rows, total];\n}\n\nconst cur = week(weekStart, weekEnd);\nconst prev = week(prevStart, weekStart);\n\nconst fmtDay = (t) => `${MONTHS[new Date(t).getUTCMonth()]} ${new Date(t).getUTCDate()}`;\nconst fmtTime = (t) => `${fmtDay(t)} ${new Date(t).toISOString().slice(11, 16)} UTC`;\nconst thousands = (n) => String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');\nconst ratingsCell = (r) => {\n  if (r.noData) return 'no data';\n  if (r.reset) return 'reset?';\n  return thousands(r.newRatings) + (r.partial ? '†' : '');\n};\nconst meanCell = (r) => {\n  if (r.mean === undefined) return '—';\n  return `${r.mean.toFixed(2)} ±${r.err.toFixed(2)}` + (r.inconsistent ? '?' : '');\n};\nconst pct = (a, b) => {\n  if (a === undefined || b === undefined || b.partial || b.newRatings <= 0) return '—';\n  const p = Math.round(((a - b.newRatings) / b.newRatings) * 100);\n  return `${p >= 0 ? '+' : '−'}${Math.abs(p)}%`;\n};\nconst diff = (a, b) => {\n  if (a === undefined || b === undefined) return '—';\n  const d = a - b;\n  return `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(2)}`;\n};\nconst reviewsCell = (r) => (r.reviews.n ? `${r.reviews.n} (${(r.reviews.sum / r.reviews.n).toFixed(1)}★)` : '0');\n\nconst header = ['', 'Ratings', 'vs prev', 'Avg★ new', 'vs prev', 'Written'];\nconst lines = cur.map((r, i) => {\n  const p = prev[i];\n  return [\n    r.country,\n    ratingsCell(r),\n    pct(r.newRatings, p.noData || p.reset ? undefined : p),\n    meanCell(r),\n    diff(r.mean, p.mean),\n    reviewsCell(r),\n  ];\n});\nconst widths = header.map((h, c) => Math.max(h.length, ...lines.map((l) => l[c].length)));\nconst render = (cells) =>\n  cells.map((cell, c) => (c === 0 ? cell.padEnd(widths[c]) : cell.padStart(widths[c]))).join('   ').trimEnd();\nconst table = [render(header), ...lines.map(render)].join('\\n');\n\nconst notes = [\n  '*Avg★ new*: mean star of the ratings received this week, derived from Apple’s running totals (± is the worst-case rounding error). *Written*: reviews with text, from the review feed (Apple publishes them ~1 day late).',\n];\nconst partialFrom = cur.filter((r) => r.partial && r.country !== 'All' && !r.noData).map((r) => r.coveredFrom);\nif (partialFrom.length && Math.max(...partialFrom) > weekStart) {\n  notes.push(`† Partial week: ratings counted from ${fmtTime(Math.max(...partialFrom))}, written reviews over the same span.`);\n}\nconst latest = COUNTRIES.filter((c) => snaps[c]?.length)\n  .map((c) => `${c} ${valueAt(snaps[c], weekEnd)?.avg.toFixed(3) ?? '—'}`)\n  .join(' · ');\nif (latest) notes.push(`All-time average at week end: ${latest}`);\n\nconst title = `Speechify iOS · App Store ratings · ${fmtDay(weekStart)} – ${fmtDay(weekEnd - DAY)}`;\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: title, emoji: true } },\n  { type: 'section', text: { type: 'mrkdwn', text: '```\\n' + table + '\\n```' } },\n  { type: 'context', elements: [{ type: 'mrkdwn', text: notes.join('\\n') }] },\n];\nconst total = cur[cur.length - 1];\nconst fallback = `${title}: ${total.noData ? 'no data' : `${thousands(total.newRatings)} new ratings, avg ${meanCell(total)}`}`;\n\nreturn [{ json: { slackBody: { text: fallback, blocks }, report: { weekStart, weekEnd, current: cur, previous: prev } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "a04b6c8d-5e7f-4a9b-9c3d-4e5f6a7b8c14",
+      "name": "Build weekly report"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_SLACK_CHANNEL_ID",
+          "mode": "id"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ JSON.stringify({ blocks: $json.slackBody.blocks }) }}",
+        "text": "={{ $json.slackBody.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        480,
+        0
+      ],
+      "id": "b15c7d9e-6f8a-4b0c-8d4e-5f6a7b8c9d15",
+      "name": "Post to Slack"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Read snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read snapshots": {
+      "main": [
+        [
+          {
+            "node": "Read reviews",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read reviews": {
+      "main": [
+        [
+          {
+            "node": "Build weekly report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build weekly report": {
+      "main": [
+        [
+          {
+            "node": "Post to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
