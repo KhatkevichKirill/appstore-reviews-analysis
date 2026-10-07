@@ -24,7 +24,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// One item per storefront. Keep this list in sync with the reviews workflow.\nconst APP_ID = '1209815023';\nconst COUNTRIES = ['us', 'gb', 'ca', 'au'];\n\n// One timestamp for the whole run, so a run's rows group together.\nconst snapshotAt = new Date().toISOString();\n\nreturn COUNTRIES.map((country) => ({ json: { appId: APP_ID, country, snapshotAt } }));"
+        "jsCode": "// One item per storefront. Keep this list in sync with the reviews workflow.\nconst APP_ID = '1209815023';\nconst COUNTRIES = ['us', 'gb', 'ca', 'au', 'br', 'in'];\n\n// One timestamp for the whole run, so a run's rows group together.\nconst snapshotAt = new Date().toISOString();\n\nreturn COUNTRIES.map((country) => ({ json: { appId: APP_ID, country, snapshotAt } }));"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

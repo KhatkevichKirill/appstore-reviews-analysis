@@ -342,6 +342,48 @@
       "id": "7c13f79c-95b1-47f6-a462-81e13ce84e40",
       "name": "Read existing rows",
       "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "Run actor and get dataset",
+        "actorId": {
+          "__rl": true,
+          "value": "4qRgh5vXXsv0bKa1l",
+          "mode": "list",
+          "cachedResultName": "🐺 App Store Reviews Scraper API | $0.10/1K Reviews (thewolves/appstore-reviews-scraper)",
+          "cachedResultUrl": "https://console.apify.com/actors/4qRgh5vXXsv0bKa1l/input"
+        },
+        "customBody": "{\n    \"customMapFunction\": \"(object) => { return {...object} }\",\n    \"maxItems\": 10,\n    \"startUrls\": [\n        \"https://apps.apple.com/br/app/speechify-text-to-speech/id1209815023\"\n    ]\n}"
+      },
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "position": [
+        0,
+        688
+      ],
+      "id": "00000000-0000-0000-0000-00005eed0000",
+      "name": "BR"
+    },
+    {
+      "parameters": {
+        "operation": "Run actor and get dataset",
+        "actorId": {
+          "__rl": true,
+          "value": "4qRgh5vXXsv0bKa1l",
+          "mode": "list",
+          "cachedResultName": "🐺 App Store Reviews Scraper API | $0.10/1K Reviews (thewolves/appstore-reviews-scraper)",
+          "cachedResultUrl": "https://console.apify.com/actors/4qRgh5vXXsv0bKa1l/input"
+        },
+        "customBody": "{\n    \"customMapFunction\": \"(object) => { return {...object} }\",\n    \"maxItems\": 10,\n    \"startUrls\": [\n        \"https://apps.apple.com/in/app/speechify-text-to-speech/id1209815023\"\n    ]\n}"
+      },
+      "type": "@apify/n8n-nodes-apify.apify",
+      "typeVersion": 1,
+      "position": [
+        0,
+        864
+      ],
+      "id": "00000000-0000-0000-0000-00005eed0001",
+      "name": "IN"
     }
   ],
   "connections": {
@@ -433,6 +475,16 @@
             "node": "AU",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "BR",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IN",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
@@ -458,6 +510,28 @@
         [
           {
             "node": "Collapse IDs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BR": {
+      "main": [
+        [
+          {
+            "node": "Keep only new reviews",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IN": {
+      "main": [
+        [
+          {
+            "node": "Keep only new reviews",
             "type": "main",
             "index": 0
           }

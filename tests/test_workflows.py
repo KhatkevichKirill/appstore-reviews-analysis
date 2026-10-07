@@ -15,6 +15,7 @@ WORKFLOWS = {
     )
 }
 NODE = shutil.which("node")
+STOREFRONTS = ["us", "gb", "ca", "au", "br", "in"]
 
 
 def load(name):
@@ -41,6 +42,26 @@ class StructureTest(unittest.TestCase):
     def test_imports_inactive(self):
         for name in WORKFLOWS:
             self.assertFalse(load(name)["active"], name)
+
+
+class StorefrontListTest(unittest.TestCase):
+    """Ratings, the weekly report and the review feed must cover the same storefronts."""
+
+    def test_all_workflows_cover_the_same_storefronts(self):
+        import re
+
+        snapshot = code_nodes(load("app-store-ratings-snapshot.json"))["Countries"]
+        report = code_nodes(load("app-store-ratings-weekly-report.json"))["Build weekly report"]
+        feed = load("app-store-reviews-to-sheet-slack.json")
+        listed = lambda src: re.findall(r"'(\w\w)'", re.search(r"const COUNTRIES = \[(.*?)\]", src).group(1))
+        scraped = [
+            re.search(r"apps\.apple\.com/(\w\w)/app/", n["parameters"]["customBody"]).group(1)
+            for n in feed["nodes"]
+            if n["type"] == "@apify/n8n-nodes-apify.apify"
+        ]
+        self.assertEqual(listed(snapshot), STOREFRONTS)
+        self.assertEqual([c.lower() for c in listed(report)], STOREFRONTS)
+        self.assertEqual(sorted(scraped), sorted(STOREFRONTS))
 
 
 class PublicRepoHygieneTest(unittest.TestCase):
@@ -120,12 +141,14 @@ console.log(JSON.stringify({ countries, rows }));
             "gb": self.lookup_body(40210, 4.6),
             "ca": self.lookup_body(30111, 4.65432),
             "au": self.lookup_body(20333, 4.68),
+            "br": self.lookup_body(15020, 4.71),
+            "in": self.lookup_body(9876, 4.59),
         }
         result = self.run_snapshot_chain(bodies)
         self.assertEqual(result.returncode, 0, result.stderr)
         out = json.loads(result.stdout)
 
-        self.assertEqual([c["json"]["country"] for c in out["countries"]], ["us", "gb", "ca", "au"])
+        self.assertEqual([c["json"]["country"] for c in out["countries"]], STOREFRONTS)
         self.assertEqual(len({c["json"]["snapshotAt"] for c in out["countries"]}), 1)
 
         rows = [r["json"] for r in out["rows"]]
@@ -147,19 +170,19 @@ console.log(JSON.stringify({ countries, rows }));
         raw = ('{"resultCount":1,"results":[{"trackId":1209815023,"version":"5.5.13",'
                '"userRatingCount":525034,'
                '"averageUserRating":4.6628699999999998482280716416426002979278564453125}]}')
-        result = self.run_snapshot_chain({"us": raw, "gb": raw, "ca": raw, "au": raw})
+        result = self.run_snapshot_chain({cc: raw for cc in STOREFRONTS})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["rows"][0]["json"]["average_user_rating"], "4.66287")
 
     def test_snapshot_chain_fails_loudly_when_app_missing(self):
         empty = json.dumps({"resultCount": 0, "results": []})
-        result = self.run_snapshot_chain({"us": empty, "gb": empty, "ca": empty, "au": empty})
+        result = self.run_snapshot_chain({cc: empty for cc in STOREFRONTS})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("app 1209815023 missing", result.stderr)
 
     def test_snapshot_chain_fails_loudly_on_non_json(self):
         html = "<html>rate limited</html>"
-        result = self.run_snapshot_chain({"us": html, "gb": html, "ca": html, "au": html})
+        result = self.run_snapshot_chain({cc: html for cc in STOREFRONTS})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("response is not JSON", result.stderr)
 
@@ -198,7 +221,8 @@ console.log(JSON.stringify(new Function('$', code)($)));
         return json.loads(result.stdout)[0]["json"]
 
     COUNTRIES = (("US", 525000, 90, 466287), ("GB", 42100, 6, 456911),
-                 ("CA", 42900, 9, 454502), ("AU", 18420, 3, 452860))
+                 ("CA", 42900, 9, 454502), ("AU", 18420, 3, 452860),
+                 ("BR", 15000, 12, 471000), ("IN", 9800, 15, 459000))
 
     @classmethod
     def synthetic(cls, countries=None):
@@ -247,7 +271,7 @@ console.log(JSON.stringify(new Function('$', code)($)));
               if s.start.strftime("%Y-%m-%d") == "2026-10-05"}
 
         js = {r["country"].upper(): r for r in report["current"]}
-        for country in ("US", "GB", "CA", "AU", rr.ALL):
+        for country in ("US", "GB", "CA", "AU", "BR", "IN", rr.ALL):
             self.assertEqual(js[country]["newRatings"], py[country].new_ratings, country)
             self.assertAlmostEqual(js[country]["mean"], float(py[country].new_average), places=9, msg=country)
             self.assertAlmostEqual(js[country]["err"], float(py[country].new_average_error), places=9, msg=country)
@@ -264,7 +288,7 @@ console.log(JSON.stringify(new Function('$', code)($)));
         table = blocks[1]["text"]["text"]
         self.assertTrue(table.startswith("```\n") and table.endswith("\n```"))
         lines = table.strip("`\n").split("\n")
-        self.assertEqual([l.split()[0] for l in lines[1:]], ["US", "GB", "CA", "AU", "All"])
+        self.assertEqual([l.split()[0] for l in lines[1:]], [cc.upper() for cc in STOREFRONTS] + ["All"])
         self.assertIn("2 (2.5★)", lines[1])
         self.assertNotIn("†", table)  # a fully covered week
         self.assertIn("new ratings", out["slackBody"]["text"])
@@ -274,7 +298,7 @@ console.log(JSON.stringify(new Function('$', code)($)));
         out = self.run_report(rows, reviews, "2026-10-12T12:17:00.000-03:00")
         lines = out["slackBody"]["blocks"][1]["text"]["text"].strip("`\n").split("\n")
         self.assertIn("no data", lines[3])  # CA
-        self.assertIn("no data", lines[5])  # All: a total over 4 storefronts needs all 4
+        self.assertIn("no data", lines[-1])  # All: a total over the storefronts needs every one
         self.assertTrue(out["slackBody"]["text"].endswith("no data"))
 
     def test_first_partial_week_is_marked(self):
@@ -282,6 +306,18 @@ console.log(JSON.stringify(new Function('$', code)($)));
         out = self.run_report(rows, reviews, "2026-10-05T12:17:00Z")
         self.assertIn("†", out["slackBody"]["blocks"][1]["text"]["text"])
         self.assertIn("Partial week: ratings counted from Sep 30 16:37 UTC", out["slackBody"]["blocks"][2]["elements"][0]["text"])
+
+
+    def test_storefronts_added_mid_week_are_named_in_the_footnote(self):
+        rows, reviews = self.synthetic()
+        late = "2026-10-07T14:07:00Z"
+        rows = [r for r in rows if r["country"] not in ("BR", "IN") or r["snapshot_at"] >= late]
+        out = self.run_report(rows, reviews, "2026-10-12T12:17:00.000-03:00")
+        lines = out["slackBody"]["blocks"][1]["text"]["text"].strip("`\n").split("\n")
+        self.assertNotIn("†", lines[1])  # US: full week
+        self.assertIn("†", lines[5])  # BR
+        self.assertIn("†", lines[-1])  # All includes partial storefronts
+        self.assertIn("† Partial week for BR, IN: ratings counted from Oct 7 14:", out["slackBody"]["blocks"][2]["elements"][0]["text"])
 
 
 @unittest.skipUnless(NODE, "node is not installed")

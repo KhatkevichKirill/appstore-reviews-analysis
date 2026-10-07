@@ -54,7 +54,7 @@ Apify node and replace every `REPLACE_WITH_…` value.
 
 ### `app-store-ratings-snapshot.json`
 
-Hourly at :07 → one Lookup request per storefront (US, GB, CA, AU; retried 3×) →
+Hourly at :07 → one Lookup request per storefront (US, GB, CA, AU, BR, IN; retried 3×) →
 append one row per storefront to the `ratings_snapshots` tab. It writes rows only and
 posts nothing to Slack.
 
@@ -71,6 +71,12 @@ Setup:
 
 The averages are written as **text** (`cellFormat: RAW`): if Sheets formats them as
 numbers it may round away the decimals the mean-of-new-ratings maths depends on.
+
+BR and IN were added on 2026-10-07 at the requester's ask, so their data starts then.
+All three workflows must list the same storefronts; a test enforces it. When adding
+one, update the snapshot workflow first: the weekly report's `All` row is `no data`
+whenever a listed storefront has no snapshots for the week. A storefront that starts
+mid-week is marked `†` and named in the footnote.
 
 Keep it **hourly**. About a third of the answers come from stale caches (see below),
 and more samples mean every window contains a fresh one.
@@ -97,7 +103,7 @@ real channel.
 
 Every 6 h at :13 → read the reviews sheet → Apify
 [`thewolves/appstore-reviews-scraper`](https://apify.com/thewolves/appstore-reviews-scraper)
-for US, CA, GB, AU → drop review ids already in the sheet → append to the sheet and
+for US, CA, GB, AU, BR, IN → drop review ids already in the sheet → append to the sheet and
 post each new review to Slack.
 
 This file carries two fixes that are **not in production yet**; apply them by hand in
