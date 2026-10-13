@@ -94,10 +94,24 @@ explains the columns, marks a partial week with `†`, and lists the all-time av
 The code is the same logic as `ratings_report.py`, and a test checks that the two
 produce identical numbers.
 
-Setup: import, pick the Google credential on both Sheets nodes and the Slack
-credential, set the spreadsheet id and the channel id, and run it once by hand. Send
-the first run to a test channel or DM to check the format before pointing it at the
-real channel.
+Week-over-week count and mean comparisons are shown only when **both** weeks are
+complete, for storefronts and the aggregate. Otherwise both comparisons show `—`.
+
+The export is inactive and **delivery is disabled by default**. Import as a new
+workflow, configure only the two read-only Sheets nodes, and run **Manual preview**.
+Inspect `Build weekly report` / `Prepare delivery`; no Slack or ledger operation runs.
+
+Delivery uses one built-in **n8n Data Table**, seeded with one control row.
+No external database or database credential is required. Conditional updates and
+owner/revision checks serialize sends and preserve a JSON history of app/week/channel
+keys. Successful and uncertain attempts block reruns; only an explicit rejection
+permits a retry. A crashed attempt keeps the control row locked until reviewed.
+See [table setup, preview, recovery and rollout instructions](docs/weekly-report-safety.md)
+and the [one-time seed CSV](templates/weekly-ratings-delivery-seed.csv).
+Existing delivered weeks must be recorded during rollout; the old unguarded sender
+must not run alongside the new one. [Isolated runtime validation](docs/isolated-n8n-validation.md)
+passed with mocked Slack and a real test-channel send/rerun; delivery remains disabled
+pending separate activation approval.
 
 ### `app-store-reviews-to-sheet-slack.json`
 
