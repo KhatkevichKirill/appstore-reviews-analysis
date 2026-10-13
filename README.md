@@ -110,7 +110,8 @@ See [table setup, preview, recovery and rollout instructions](docs/weekly-report
 and the [one-time seed CSV](templates/weekly-ratings-delivery-seed.csv).
 Existing delivered weeks must be recorded during rollout; the old unguarded sender
 must not run alongside the new one. [Isolated runtime validation](docs/isolated-n8n-validation.md)
-passed with mocked Slack; delivery remains disabled pending separate activation approval.
+passed with mocked Slack and a real test-channel send/rerun; delivery remains disabled
+pending separate activation approval.
 
 ### `app-store-reviews-to-sheet-slack.json`
 

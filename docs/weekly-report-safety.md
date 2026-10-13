@@ -159,10 +159,15 @@ with synthetic reports and persistent mock Slack receipts. Four conditional
 updates overlapped and only one sent. Repeats, definite failure and retry,
 uncertainty, interruption after a mock send, and scoped recovery all passed.
 See the [runtime evidence and limitations](isolated-n8n-validation.md).
-The fixture is inactive, unpublished and defaults to observation. No production
-workflow/table was changed and no real Slack message was sent. Manual/scheduled
-trigger overlap, physical server restart and real Slack remain untested;
-production activation still requires separate approval.
+A separately authorized follow-up sent one synthetic message to the designated
+test Slack channel using the production HTTP sender parameters and an existing
+n8n OAuth credential. Slack confirmed success, completion was persisted, and
+the repeat stopped before claim. Channel history contained zero matching test
+messages before sending and exactly one after the repeat. The fixture is inactive,
+unpublished and defaults to observation; its real HTTP sender is disabled again.
+No production workflow/table was changed. Manual/scheduled trigger overlap and
+physical server restart remain untested; production activation still requires
+separate approval.
 
 References: [Data Tables](https://docs.n8n.io/data/data-tables/),
 [Data Table Update](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.datatable/rows/),
