@@ -162,16 +162,118 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "INSERT INTO weekly_ratings_delivery AS ledger (report_key, owner, state, payload)\nVALUES ($1, $2, 'sending', $3::jsonb)\nON CONFLICT (report_key) DO UPDATE\nSET owner = EXCLUDED.owner, state = 'sending', payload = EXCLUDED.payload,\n    slack_ts = NULL, detail = NULL, updated_at = now()\nWHERE ledger.state = 'failed'\nRETURNING report_key, owner, state;",
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_WITH_DATA_TABLE_ID"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.controlId }}"
+            },
+            {
+              "keyName": "revision",
+              "condition": "eq",
+              "keyValue": "={{ $json.expectedRevision }}"
+            },
+            {
+              "keyName": "state",
+              "condition": "eq",
+              "keyValue": "idle"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "state": "sending",
+            "owner": "={{ $json.owner }}",
+            "active_key": "={{ $json.key }}",
+            "revision": "={{ $json.claimedRevision }}",
+            "ledger": "={{ $json.ledger }}",
+            "payload": "={{ $json.storedPayload }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "control_key",
+              "displayName": "control_key",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "state",
+              "displayName": "state",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "owner",
+              "displayName": "owner",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "active_key",
+              "displayName": "active_key",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "revision",
+              "displayName": "revision",
+              "type": "number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ledger",
+              "displayName": "ledger",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
         "options": {
-          "queryReplacement": "={{ [$json.key, $json.owner, JSON.stringify($json.payload)] }}"
+          "dryRun": false
         }
       },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
       "position": [
-        960,
+        1440,
         -100
       ],
       "id": "90340d49-c088-4ec9-b7b3-ade98463b46b",
@@ -180,12 +282,12 @@
     },
     {
       "parameters": {
-        "jsCode": "const delivery = $('Prepare delivery').first().json;\nconst claims = $input.all();\nif (delivery.preview || claims.length !== 1) return [];\nconst claim = claims[0].json;\nif (claim.report_key !== delivery.key || claim.owner !== delivery.owner || claim.state !== 'sending') return [];\nreturn [{ json: delivery }];\n"
+        "jsCode": "const delivery = $('Prepare claim').first().json;\nconst rows = $input.all();\nif (delivery.preview || rows.length !== 1) return [];\nconst row = rows[0].json;\n// SQLite may return a reread row even for a lost update. Check ownership AND\n// revision/content, never merely \"the update node returned an item\".\nif (row.id !== delivery.controlId || row.control_key !== 'weekly-ratings' ||\n    row.revision !== delivery.claimedRevision || row.state !== 'sending' ||\n    row.owner !== delivery.owner || row.active_key !== delivery.key ||\n    row.ledger !== delivery.ledger || row.payload !== delivery.storedPayload) return [];\nreturn [{ json: delivery }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1200,
+        1680,
         -100
       ],
       "id": "6e20b0de-70e3-4131-ab16-9273b9a85121",
@@ -219,7 +321,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1440,
+        1920,
         -100
       ],
       "id": "b9821762-a48e-432c-8274-8c207c215e94",
@@ -234,7 +336,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1680,
+        2160,
         -100
       ],
       "id": "d0275f17-ea7c-443b-80bf-2ec4ba8310a1",
@@ -242,34 +344,203 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "UPDATE weekly_ratings_delivery\nSET state = $3, slack_ts = $4, detail = $5, updated_at = now()\nWHERE report_key = $1 AND owner = $2 AND state = 'sending'\nRETURNING report_key, state, slack_ts;",
+        "resource": "row",
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_WITH_DATA_TABLE_ID"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.controlId }}"
+            },
+            {
+              "keyName": "revision",
+              "condition": "eq",
+              "keyValue": "={{ $json.claimedRevision }}"
+            },
+            {
+              "keyName": "state",
+              "condition": "eq",
+              "keyValue": "sending"
+            },
+            {
+              "keyName": "owner",
+              "condition": "eq",
+              "keyValue": "={{ $json.owner }}"
+            },
+            {
+              "keyName": "active_key",
+              "condition": "eq",
+              "keyValue": "={{ $json.key }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "state": "idle",
+            "revision": "={{ $json.completedRevision }}",
+            "ledger": "={{ $json.ledger }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "control_key",
+              "displayName": "control_key",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "state",
+              "displayName": "state",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "owner",
+              "displayName": "owner",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "active_key",
+              "displayName": "active_key",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "revision",
+              "displayName": "revision",
+              "type": "number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ledger",
+              "displayName": "ledger",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "payload",
+              "displayName": "payload",
+              "type": "string",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
         "options": {
-          "queryReplacement": "={{ [$json.key, $json.owner, $json.state, $json.ts, $json.detail] }}"
+          "dryRun": false
         }
       },
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.6,
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
       "position": [
-        1920,
+        2640,
         -100
       ],
       "id": "20d092df-2fc7-428b-94bf-15a528edc961",
       "name": "Persist delivery result",
-      "retryOnFail": false
+      "retryOnFail": false,
+      "alwaysOutputData": true
     },
     {
       "parameters": {
-        "jsCode": "const rows = $input.all();\nif (rows.length !== 1 || rows[0].json.state !== 'sent') {\n  throw new Error('Delivery not confirmed. Inspect the ledger and execution before retrying.');\n}\nreturn rows;\n"
+        "jsCode": "const result = $('Prepare persistence').first().json;\nconst rows = $input.all();\nconst row = rows[0]?.json;\nif (rows.length !== 1 || row?.id !== result.controlId || row.state !== 'idle' ||\n    row.revision !== result.completedRevision || row.owner !== result.owner ||\n    row.active_key !== result.key || row.ledger !== result.ledger) {\n  throw new Error('Delivery result was not persisted by this owner; inspect the control row');\n}\nif (result.state !== 'sent') throw new Error('Delivery not confirmed; inspect the ledger before retrying');\nreturn [{ json: { key: result.key, state: result.state, ts: result.ts } }];\n"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2160,
+        2880,
         -100
       ],
       "id": "1f6b4303-37ff-46a5-aadf-8f1d1e05fe2c",
       "name": "Check delivery result"
+    },
+    {
+      "id": "f660cac4-44ae-469d-9922-7e979ab1b9d7",
+      "name": "Read delivery state",
+      "parameters": {
+        "resource": "row",
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "REPLACE_WITH_DATA_TABLE_ID"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "control_key",
+              "condition": "eq",
+              "keyValue": "weekly-ratings"
+            }
+          ]
+        },
+        "returnAll": false,
+        "limit": 2
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        960,
+        -100
+      ],
+      "retryOnFail": false,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const delivery = $('Prepare delivery').first().json;\nif (delivery.preview) return [];\nconst rows = $input.all();\nconst row = rows[0]?.json;\nif (rows.length !== 1 || !Number.isSafeInteger(row?.id) || row.control_key !== 'weekly-ratings' ||\n    !Number.isSafeInteger(row.revision) || row.revision < 0 || row.revision > Number.MAX_SAFE_INTEGER - 2 ||\n    typeof row.ledger !== 'string' || typeof row.owner !== 'string' ||\n    typeof row.active_key !== 'string' || typeof row.payload !== 'string' ||\n    !['idle', 'sending'].includes(row.state)) {\n  throw new Error('Delivery table must contain exactly one valid seeded control row');\n}\nlet ledger;\ntry { ledger = JSON.parse(row.ledger); } catch { throw new Error('Invalid delivery ledger JSON'); }\nif (!ledger || typeof ledger !== 'object' || Array.isArray(ledger)) throw new Error('Invalid delivery ledger');\nfor (const entry of Object.values(ledger)) {\n  if (!entry || !['sending', 'sent', 'failed', 'ambiguous'].includes(entry.state) ||\n      typeof entry.owner !== 'string' ||\n      (entry.state === 'sent' && (typeof entry.ts !== 'string' || !/^\\d+\\.\\d+$/.test(entry.ts))) ||\n      (entry.state !== 'sent' && entry.ts !== null)) {\n    throw new Error('Invalid delivery ledger entry; reconcile before sending');\n  }\n}\n// A single existing row avoids racing inserts/upserts. A crash keeps it locked.\nif (row.state === 'sending') throw new Error('Delivery is locked by an unfinished attempt; inspect the owner before retrying');\nconst previous = Object.hasOwn(ledger, delivery.key) ? ledger[delivery.key] : null;\nif (previous && previous.state !== 'failed') return [];\nledger[delivery.key] = { state: 'sending', owner: delivery.owner, ts: null, detail: null };\nreturn [{ json: { ...delivery, controlId: row.id, expectedRevision: row.revision,\n  claimedRevision: row.revision + 1, ledger: JSON.stringify(ledger),\n  storedPayload: JSON.stringify(delivery.payload) } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -100
+      ],
+      "id": "0b1a5fe8-73ba-4693-a17c-cc63273258a5",
+      "name": "Prepare claim"
+    },
+    {
+      "parameters": {
+        "jsCode": "const delivery = $('Build guarded request').first().json;\nconst result = $input.first().json;\nif (result.key !== delivery.key || result.owner !== delivery.owner ||\n    !['sent', 'failed', 'ambiguous'].includes(result.state) ||\n    (result.state === 'sent' && (typeof result.ts !== 'string' || !/^\\d+\\.\\d+$/.test(result.ts))) ||\n    (result.state !== 'sent' && result.ts !== null)) {\n  throw new Error('Invalid delivery result; leave control row locked');\n}\nconst ledger = JSON.parse(delivery.ledger);\nif (ledger[delivery.key]?.state !== 'sending' || ledger[delivery.key]?.owner !== delivery.owner) {\n  throw new Error('Claim/result mismatch; leave control row locked');\n}\nledger[delivery.key] = { state: result.state, owner: result.owner, ts: result.ts,\n  detail: result.detail, completedAt: new Date().toISOString() };\nreturn [{ json: { ...result, controlId: delivery.controlId,\n  claimedRevision: delivery.claimedRevision, completedRevision: delivery.claimedRevision + 1,\n  ledger: JSON.stringify(ledger) } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        -100
+      ],
+      "id": "67f9a776-7ea6-42fd-829c-2322c227a22b",
+      "name": "Prepare persistence"
     }
   ],
   "connections": {
@@ -354,7 +625,7 @@
       "main": [
         [
           {
-            "node": "Claim delivery",
+            "node": "Read delivery state",
             "type": "main",
             "index": 0
           }
@@ -398,7 +669,7 @@
       "main": [
         [
           {
-            "node": "Persist delivery result",
+            "node": "Prepare persistence",
             "type": "main",
             "index": 0
           }
@@ -410,6 +681,39 @@
         [
           {
             "node": "Check delivery result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read delivery state": {
+      "main": [
+        [
+          {
+            "node": "Prepare claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare claim": {
+      "main": [
+        [
+          {
+            "node": "Claim delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare persistence": {
+      "main": [
+        [
+          {
+            "node": "Persist delivery result",
             "type": "main",
             "index": 0
           }

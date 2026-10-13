@@ -112,7 +112,7 @@ class DeliveryCodeSafetyTest(unittest.TestCase):
             self.assertTrue(delivery['preview'])
             self.assertNotIn('key', delivery)
             self.assertEqual(run_code('Build guarded request', [{'state': 'sending'}],
-                {'Prepare delivery': delivery}), [])
+                {'Prepare claim': delivery}), [])
 
     def test_report_key_is_stable_across_execution_ids(self):
         report = {'report': {'weekStart': 1791158400000}, 'slackBody': {'text': 'report'}}
@@ -132,13 +132,49 @@ class DeliveryCodeSafetyTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.delivery(channel='REPLACE_WITH_SLACK_CHANNEL_ID')
 
-    def test_guard_requires_matching_claim_and_owner(self):
+    def claim(self, delivery=None, rows=None):
+        delivery = delivery or self.delivery()
+        row = {'id': 1, 'control_key': 'weekly-ratings', 'state': 'idle', 'owner': '',
+               'active_key': '', 'revision': 0, 'ledger': '{}', 'payload': ''}
+        out = run_code('Prepare claim', rows if rows is not None else [row], {'Prepare delivery': delivery})
+        return out[0] if out else None
+
+    def claimed_row(self, plan):
+        return {'id': plan['controlId'], 'control_key': 'weekly-ratings', 'state': 'sending',
+                'owner': plan['owner'], 'active_key': plan['key'], 'revision': plan['claimedRevision'],
+                'ledger': plan['ledger'], 'payload': plan['storedPayload']}
+
+    def test_guard_requires_matching_claim_owner_revision_and_content(self):
+        plan = self.claim()
+        row = self.claimed_row(plan)
+        self.assertEqual(run_code('Build guarded request', [row], {'Prepare claim': plan}), [plan])
+        for invalid in ({}, {'success': True}, {**row, 'state': 'idle'}, {**row, 'owner': 'other'},
+                        {**row, 'active_key': 'other'}, {**row, 'revision': 0}, {**row, 'ledger': '{}'},
+                        {**row, 'payload': 'different'}):
+            self.assertEqual(run_code('Build guarded request', [invalid], {'Prepare claim': plan}), [])
+
+    def test_missing_duplicate_and_corrupted_seed_fail_closed(self):
+        seed = {'id': 1, 'control_key': 'weekly-ratings', 'state': 'idle', 'owner': '',
+                'active_key': '', 'revision': 0, 'ledger': '{}', 'payload': ''}
+        for rows in ([], [{}], [seed, {**seed, 'id': 2}], [{**seed, 'ledger': 'bad JSON'}],
+                     [{**seed, 'ledger': '[]'}], [{**seed, 'revision': -1}],
+                     [{**seed, 'ledger': '{"old": {"state": "unknown"}}'}]):
+            with self.assertRaises(AssertionError):
+                self.claim(rows=rows)
+        with self.assertRaises(AssertionError):
+            self.claim(rows=[{**seed, 'state': 'sending'}])
+
+    def test_sent_ambiguous_and_unfinished_entries_block_but_failed_can_retry(self):
         delivery = self.delivery()
-        claim = {'report_key': delivery['key'], 'owner': delivery['owner'], 'state': 'sending'}
-        self.assertEqual(run_code('Build guarded request', [claim], {'Prepare delivery': delivery}), [delivery])
-        for invalid in ({}, {'success': True}, {**claim, 'state': 'sent'}, {**claim, 'owner': 'other'},
-                        {**claim, 'report_key': 'other'}):
-            self.assertEqual(run_code('Build guarded request', [invalid], {'Prepare delivery': delivery}), [])
+        for state in ('sent', 'sending', 'ambiguous', 'failed'):
+            seed = {'id': 1, 'control_key': 'weekly-ratings', 'state': 'idle', 'owner': 'previous',
+                    'active_key': delivery['key'], 'revision': 2, 'payload': '',
+                    'ledger': json.dumps({delivery['key']: {'state': state, 'owner': 'previous', 'ts': '123.456' if state == 'sent' else None}})}
+            plan = self.claim(delivery, [seed])
+            if state == 'failed':
+                self.assertEqual(plan['claimedRevision'], 3)
+            else:
+                self.assertIsNone(plan)
 
     def classify(self, response):
         return run_code('Classify delivery result', [response],
@@ -160,16 +196,37 @@ class DeliveryCodeSafetyTest(unittest.TestCase):
                          {'statusCode': 200, 'body': {'ok': True, 'channel': 'COTHER', 'ts': '123.456'}}):
             self.assertEqual(self.classify(response)['state'], 'ambiguous')
 
-    def test_only_confirmed_persisted_success_completes(self):
-        self.assertEqual(run_code('Check delivery result', [{'state': 'sent'}]), [{'state': 'sent'}])
-        for rows in ([], [{'state': 'sending'}], [{'state': 'failed'}], [{'state': 'ambiguous'}], [{'success': True}]):
+    def test_only_owner_verified_persisted_success_completes(self):
+        plan = self.claim()
+        for state in ('sent', 'failed', 'ambiguous'):
+            result = {'key': plan['key'], 'owner': plan['owner'], 'state': state,
+                      'ts': '123.456' if state == 'sent' else None, 'detail': None}
+            final = run_code('Prepare persistence', [result], {'Build guarded request': plan})[0]
+            row = {**self.claimed_row(plan), 'state': 'idle', 'revision': final['completedRevision'],
+                   'ledger': final['ledger']}
+            if state == 'sent':
+                out = run_code('Check delivery result', [row], {'Prepare persistence': final})
+                self.assertEqual(out[0]['state'], 'sent')
+                for invalid in ([], [{}], [{**row, 'owner': 'other'}], [{**row, 'revision': 0}],
+                                [{**row, 'ledger': '{}'}], [row, row]):
+                    with self.assertRaises(AssertionError):
+                        run_code('Check delivery result', invalid, {'Prepare persistence': final})
+            else:
+                with self.assertRaises(AssertionError):
+                    run_code('Check delivery result', [row], {'Prepare persistence': final})
+
+    def test_invalid_completion_leaves_claim_locked(self):
+        plan = self.claim()
+        for result in ({'key': plan['key'], 'owner': 'other', 'state': 'sent', 'ts': '123.456'},
+                       {'key': plan['key'], 'owner': plan['owner'], 'state': 'sent', 'ts': None},
+                       {'key': plan['key'], 'owner': plan['owner'], 'state': 'failed', 'ts': '123.456'}):
             with self.assertRaises(AssertionError):
-                run_code('Check delivery result', rows)
+                run_code('Prepare persistence', [result], {'Build guarded request': plan})
 
     def test_export_wiring_has_no_delivery_bypass_or_retries(self):
         nodes = {n['name']: n for n in WF['nodes']}
         self.assertFalse(WF['active'])
-        self.assertEqual(WF['connections']['Delivery enabled?']['main'][0][0]['node'], 'Claim delivery')
+        self.assertEqual(WF['connections']['Delivery enabled?']['main'][0][0]['node'], 'Read delivery state')
         self.assertEqual(WF['connections']['Post to Slack']['main'][0][0]['node'], 'Classify delivery result')
         incoming = [source for source, outputs in WF['connections'].items()
                     for branch in outputs['main'] for target in branch if target['node'] == 'Post to Slack']
@@ -179,5 +236,16 @@ class DeliveryCodeSafetyTest(unittest.TestCase):
         post = nodes['Post to Slack']
         self.assertEqual(post['parameters']['options']['redirect']['redirect']['followRedirects'], False)
         self.assertNotIn('credentials', post)
-        self.assertIn("WHERE ledger.state = 'failed'", nodes['Claim delivery']['parameters']['query'])
-        self.assertIn("AND state = 'sending'", nodes['Persist delivery result']['parameters']['query'])
+        self.assertFalse(any(n['type'] == 'n8n-nodes-base.postgres' for n in WF['nodes']))
+        for name in ('Claim delivery', 'Persist delivery result'):
+            params = nodes[name]['parameters']
+            self.assertEqual(params['operation'], 'update')
+            self.assertEqual(params['matchType'], 'allConditions')
+            self.assertEqual(params['options']['dryRun'], False)
+            keys = {f['keyName'] for f in params['filters']['conditions']}
+            self.assertTrue({'id', 'revision', 'state'} <= keys)
+            if name == 'Persist delivery result':
+                self.assertTrue({'owner', 'active_key'} <= keys)
+        for n in WF['nodes']:
+            if n['type'] == 'n8n-nodes-base.dataTable':
+                self.assertEqual(n['parameters']['dataTableId']['value'], 'REPLACE_WITH_DATA_TABLE_ID')

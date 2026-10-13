@@ -1,5 +1,7 @@
 # Exported sheet data stays local: this repo is public.
 *.csv
+# Synthetic one-row setup template; contains no exported sheet data.
+!templates/weekly-ratings-delivery-seed.csv
 data/
 
 __pycache__/

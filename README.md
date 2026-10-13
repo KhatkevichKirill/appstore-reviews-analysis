@@ -101,13 +101,16 @@ The export is inactive and **delivery is disabled by default**. Import as a new
 workflow, configure only the two read-only Sheets nodes, and run **Manual preview**.
 Inspect `Build weekly report` / `Prepare delivery`; no Slack or ledger operation runs.
 
-Delivery now requires a shared durable PostgreSQL journal, an atomic report-week /
-channel claim, and separately approved setup. It does not use Sheets or workflow
-static data for deduplication. Successful and uncertain attempts block reruns;
-only an explicit rejection permits a retry. See
-[preview, persistence, recovery and rollout instructions](docs/weekly-report-safety.md)
-before any activation. Existing delivered weeks must be recorded during rollout;
-the old unguarded sender must not run alongside the new one.
+Delivery uses one built-in **n8n Data Table**, seeded with one control row.
+No external database or database credential is required. Conditional updates and
+owner/revision checks serialize sends and preserve a JSON history of app/week/channel
+keys. Successful and uncertain attempts block reruns; only an explicit rejection
+permits a retry. A crashed attempt keeps the control row locked until reviewed.
+See [table setup, preview, recovery and rollout instructions](docs/weekly-report-safety.md)
+and the [one-time seed CSV](templates/weekly-ratings-delivery-seed.csv).
+Existing delivered weeks must be recorded during rollout; the old unguarded sender
+must not run alongside the new one. Delivery remains disabled pending isolated
+runtime validation and separate activation approval.
 
 ### `app-store-reviews-to-sheet-slack.json`
 
