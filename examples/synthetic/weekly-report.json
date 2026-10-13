@@ -1,0 +1,242 @@
+{
+  "synthetic": true,
+  "reportDate": "2026-10-12T12:17:00Z",
+  "report": {
+    "weekStart": 1791158400000,
+    "weekEnd": 1791763200000,
+    "current": [
+      {
+        "country": "US",
+        "coveredFrom": 1791158400000,
+        "partial": false,
+        "newRatings": 336,
+        "avgEnd": 4.47481,
+        "weighted": 1411.13232,
+        "errNum": 0.10504,
+        "mean": 4.1997985714285715,
+        "err": 0.0003126190476190476,
+        "inconsistent": false,
+        "reviews": {
+          "n": 1,
+          "sum": 4
+        },
+        "comparison": {
+          "countPercent": 100,
+          "meanDelta": 0.19963380952380927
+        }
+      },
+      {
+        "country": "GB",
+        "coveredFrom": 1791158400000,
+        "partial": false,
+        "newRatings": 420,
+        "avgEnd": 4.47383,
+        "weighted": 1763.9994,
+        "errNum": 0.1263,
+        "mean": 4.199998571428571,
+        "err": 0.0003007142857142857,
+        "inconsistent": false,
+        "reviews": {
+          "n": 1,
+          "sum": 4
+        },
+        "comparison": {
+          "countPercent": 100,
+          "meanDelta": 0.20007571428571413
+        }
+      },
+      {
+        "country": "CA",
+        "coveredFrom": 1791158400000,
+        "partial": false,
+        "newRatings": 504,
+        "avgEnd": 4.47313,
+        "weighted": 2116.66952,
+        "errNum": 0.14756,
+        "mean": 4.199741111111111,
+        "err": 0.00029277777777777776,
+        "inconsistent": false,
+        "reviews": {
+          "n": 1,
+          "sum": 4
+        },
+        "comparison": {
+          "countPercent": 100,
+          "meanDelta": 0.1995300000000002
+        }
+      },
+      {
+        "country": "AU",
+        "coveredFrom": 1791158400000,
+        "partial": false,
+        "newRatings": 588,
+        "avgEnd": 4.47261,
+        "weighted": 2469.48872,
+        "errNum": 0.16882,
+        "mean": 4.19981074829932,
+        "err": 0.00028710884353741494,
+        "inconsistent": false,
+        "reviews": {
+          "n": 1,
+          "sum": 4
+        },
+        "comparison": {
+          "countPercent": 100,
+          "meanDelta": 0.19970013605442194
+        }
+      },
+      {
+        "country": "BR",
+        "coveredFrom": 1791374400000,
+        "partial": true,
+        "newRatings": 480,
+        "avgEnd": 4.47221,
+        "weighted": 2016.12192,
+        "errNum": 0.19104,
+        "mean": 4.200254,
+        "err": 0.00039799999999999997,
+        "inconsistent": false,
+        "reviews": {
+          "n": 1,
+          "sum": 4
+        },
+        "comparison": {
+          "countPercent": null,
+          "meanDelta": null
+        }
+      },
+      {
+        "country": "IN",
+        "coveredFrom": 1791374400000,
+        "partial": true,
+        "newRatings": 540,
+        "avgEnd": 4.47189,
+        "weighted": 2268.0166,
+        "errNum": 0.21242,
+        "mean": 4.200030740740741,
+        "err": 0.00039337037037037037,
+        "inconsistent": false,
+        "reviews": {
+          "n": 1,
+          "sum": 4
+        },
+        "comparison": {
+          "countPercent": null,
+          "meanDelta": null
+        }
+      },
+      {
+        "country": "All",
+        "partial": true,
+        "inconsistent": false,
+        "reviews": {
+          "n": 6,
+          "sum": 24
+        },
+        "newRatings": 2868,
+        "mean": 4.199940195258019,
+        "err": 0.0003316527196652719,
+        "comparison": {
+          "countPercent": null,
+          "meanDelta": null
+        }
+      }
+    ],
+    "previous": [
+      {
+        "country": "US",
+        "coveredFrom": 1790553600000,
+        "partial": false,
+        "newRatings": 168,
+        "avgEnd": 4.48375,
+        "weighted": 672.02768,
+        "errNum": 0.10252,
+        "mean": 4.000164761904762,
+        "err": 0.0006102380952380952,
+        "inconsistent": false,
+        "reviews": {
+          "n": 0,
+          "sum": 0
+        }
+      },
+      {
+        "country": "GB",
+        "coveredFrom": 1790553600000,
+        "partial": false,
+        "newRatings": 210,
+        "avgEnd": 4.48309,
+        "weighted": 839.9838,
+        "errNum": 0.12315,
+        "mean": 3.999922857142857,
+        "err": 0.0005864285714285714,
+        "inconsistent": false,
+        "reviews": {
+          "n": 0,
+          "sum": 0
+        }
+      },
+      {
+        "country": "CA",
+        "coveredFrom": 1790553600000,
+        "partial": false,
+        "newRatings": 252,
+        "avgEnd": 4.48263,
+        "weighted": 1008.0532,
+        "errNum": 0.14378,
+        "mean": 4.000211111111111,
+        "err": 0.0005705555555555555,
+        "inconsistent": false,
+        "reviews": {
+          "n": 0,
+          "sum": 0
+        }
+      },
+      {
+        "country": "AU",
+        "coveredFrom": 1790553600000,
+        "partial": false,
+        "newRatings": 294,
+        "avgEnd": 4.48228,
+        "weighted": 1176.03252,
+        "errNum": 0.16441,
+        "mean": 4.000110612244898,
+        "err": 0.00055921768707483,
+        "inconsistent": false,
+        "reviews": {
+          "n": 0,
+          "sum": 0
+        }
+      },
+      {
+        "country": "BR",
+        "coveredFrom": 1790553600000,
+        "partial": true,
+        "noData": true,
+        "reviews": {
+          "n": 0,
+          "sum": 0
+        }
+      },
+      {
+        "country": "IN",
+        "coveredFrom": 1790553600000,
+        "partial": true,
+        "noData": true,
+        "reviews": {
+          "n": 0,
+          "sum": 0
+        }
+      },
+      {
+        "country": "All",
+        "partial": true,
+        "inconsistent": false,
+        "reviews": {
+          "n": 0,
+          "sum": 0
+        },
+        "noData": true
+      }
+    ]
+  }
+}

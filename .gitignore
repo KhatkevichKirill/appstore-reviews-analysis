@@ -2,6 +2,9 @@
 *.csv
 # Synthetic one-row setup template; contains no exported sheet data.
 !templates/weekly-ratings-delivery-seed.csv
+# Explicitly generated fictional publication examples only.
+!examples/synthetic/ratings_snapshots.csv
+!examples/synthetic/written_reviews.csv
 data/
 
 __pycache__/
