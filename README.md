@@ -94,10 +94,20 @@ explains the columns, marks a partial week with `†`, and lists the all-time av
 The code is the same logic as `ratings_report.py`, and a test checks that the two
 produce identical numbers.
 
-Setup: import, pick the Google credential on both Sheets nodes and the Slack
-credential, set the spreadsheet id and the channel id, and run it once by hand. Send
-the first run to a test channel or DM to check the format before pointing it at the
-real channel.
+Week-over-week count and mean comparisons are shown only when **both** weeks are
+complete, for storefronts and the aggregate. Otherwise both comparisons show `—`.
+
+The export is inactive and **delivery is disabled by default**. Import as a new
+workflow, configure only the two read-only Sheets nodes, and run **Manual preview**.
+Inspect `Build weekly report` / `Prepare delivery`; no Slack or ledger operation runs.
+
+Delivery now requires a shared durable PostgreSQL journal, an atomic report-week /
+channel claim, and separately approved setup. It does not use Sheets or workflow
+static data for deduplication. Successful and uncertain attempts block reruns;
+only an explicit rejection permits a retry. See
+[preview, persistence, recovery and rollout instructions](docs/weekly-report-safety.md)
+before any activation. Existing delivered weeks must be recorded during rollout;
+the old unguarded sender must not run alongside the new one.
 
 ### `app-store-reviews-to-sheet-slack.json`
 

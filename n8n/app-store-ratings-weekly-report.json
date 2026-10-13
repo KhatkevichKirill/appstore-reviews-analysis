@@ -19,7 +19,7 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.3,
       "position": [
-        -480,
+        -960,
         0
       ],
       "id": "7d1e3f5a-2b4c-4d6e-8f0a-1b2c3d4e5f11",
@@ -78,7 +78,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Weekly App Store ratings report: one Slack message for the last full week (Mon-Sun, UTC).\n// Ratings come from the hourly `ratings_snapshots` rows, written reviews from the review sheet.\n// Same logic as scripts/ratings_report.py; the README explains the maths.\nconst COUNTRIES = ['US', 'GB', 'CA', 'AU', 'BR', 'IN'];\nconst DAY = 24 * 3600 * 1000;\n// About a third of Lookup answers come from a stale edge cache (up to ~a day old), so\n// the value at a moment is the highest count seen in the 48 h before it.\nconst WINDOW = 2 * DAY;\nconst MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];\n\nlet now = new Date();\ntry {\n  const ts = $('Schedule Trigger').first().json.timestamp;\n  if (ts) now = new Date(ts);\n} catch (e) {\n  // Run without the trigger (e.g. a single node test): use the current time.\n}\n\nconst today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());\nconst weekEnd = today - ((new Date(today).getUTCDay() + 6) % 7) * DAY; // this Monday 00:00 UTC\nconst weekStart = weekEnd - 7 * DAY;\nconst prevStart = weekStart - 7 * DAY;\n\nconst num = (v) => Number(String(v ?? '').replace(/,/g, ''));\n// Shortest form of the double: Apple's raw answer prints 4.66287 as 4.66286999999...\nconst decimals = (v) => {\n  const s = String(parseFloat(v));\n  return s.includes('.') ? s.split('.')[1].length : 0;\n};\nconst parseDate = (v) => {\n  if (typeof v === 'number') return Math.round((v - 25569) * DAY); // Sheets serial date\n  const t = Date.parse(String(v ?? ''));\n  return Number.isNaN(t) ? null : t;\n};\n\nconst snaps = {};\nfor (const { json: r } of $('Read snapshots').all()) {\n  const at = Date.parse(r.snapshot_at);\n  const count = num(r.user_rating_count);\n  const avgText = String(r.average_user_rating ?? '').trim();\n  const avg = parseFloat(avgText);\n  const country = String(r.country ?? '').toUpperCase();\n  if (Number.isNaN(at) || !Number.isInteger(count) || Number.isNaN(avg) || !country) continue;\n  (snaps[country] ||= []).push({ at, count, avg, d: decimals(avgText) });\n}\nfor (const list of Object.values(snaps)) list.sort((a, b) => a.at - b.at);\n\nconst reviews = [];\nfor (const { json: r } of $('Read reviews').all()) {\n  const at = parseDate(r.date);\n  const score = Math.round(num(r.score));\n  if (at === null || !(score >= 1 && score <= 5)) continue;\n  reviews.push({ at, score, country: String(r.country ?? '').toUpperCase() });\n}\n\nfunction valueAt(list, t) {\n  let best = null;\n  let last = null;\n  for (const s of list) {\n    if (s.at > t) break;\n    last = s;\n    if (s.at > t - WINDOW && (!best || s.count >= best.count)) best = s;\n  }\n  return best || last;\n}\n\nfunction ratingStats(list, start, end) {\n  const out = { coveredFrom: start, partial: false };\n  let base = valueAt(list, start);\n  if (!base) {\n    base = list.find((s) => s.at >= start && s.at < end) || null;\n    out.partial = true;\n    if (base) out.coveredFrom = base.at;\n  }\n  const last = valueAt(list, end);\n  if (end > list[list.length - 1].at) out.partial = true;\n  if (!base || !last || !list.some((s) => s.at > start && s.at <= end)) {\n    out.noData = true;\n    return out;\n  }\n  out.newRatings = last.count - base.count;\n  out.avgEnd = last.avg;\n  if (out.newRatings < 0) {\n    out.reset = true; // a summary-rating reset or removed ratings\n    return out;\n  }\n  // Integer arithmetic in units of the average's last decimal, so N*A is exact.\n  const scale = 10 ** list.reduce((m, s) => Math.max(m, s.d), 0);\n  const a1 = Math.round(base.avg * scale);\n  const a2 = Math.round(last.avg * scale);\n  out.weighted = (last.count * a2 - base.count * a1) / scale; // N2*A2 - N1*A1\n  out.errNum = (0.5 * (base.count + last.count)) / scale;\n  if (out.newRatings > 0) {\n    out.mean = out.weighted / out.newRatings;\n    out.err = out.errNum / out.newRatings;\n    out.inconsistent = out.mean < 1 - out.err || out.mean > 5 + out.err;\n  }\n  return out;\n}\n\nfunction reviewStats(country, from, end) {\n  const rs = reviews.filter((r) => r.country === country && r.at >= from && r.at < end);\n  return { n: rs.length, sum: rs.reduce((s, r) => s + r.score, 0) };\n}\n\nfunction week(start, end) {\n  const rows = COUNTRIES.map((country) => {\n    const list = snaps[country] || [];\n    const r = list.length ? ratingStats(list, start, end) : { coveredFrom: start, noData: true };\n    return { country, ...r, reviews: reviewStats(country, r.coveredFrom, end) };\n  });\n  const total = {\n    country: 'All',\n    partial: rows.some((r) => r.partial),\n    reviews: rows.reduce((t, r) => ({ n: t.n + r.reviews.n, sum: t.sum + r.reviews.sum }), { n: 0, sum: 0 }),\n  };\n  if (rows.every((r) => r.weighted !== undefined)) {\n    total.newRatings = rows.reduce((s, r) => s + r.newRatings, 0);\n    if (total.newRatings > 0) {\n      total.mean = rows.reduce((s, r) => s + r.weighted, 0) / total.newRatings;\n      total.err = rows.reduce((s, r) => s + r.errNum, 0) / total.newRatings;\n    }\n  } else {\n    total.noData = true;\n  }\n  return [...rows, total];\n}\n\nconst cur = week(weekStart, weekEnd);\nconst prev = week(prevStart, weekStart);\n\nconst fmtDay = (t) => `${MONTHS[new Date(t).getUTCMonth()]} ${new Date(t).getUTCDate()}`;\nconst fmtTime = (t) => `${fmtDay(t)} ${new Date(t).toISOString().slice(11, 16)} UTC`;\nconst thousands = (n) => String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');\nconst ratingsCell = (r) => {\n  if (r.noData) return 'no data';\n  if (r.reset) return 'reset?';\n  return thousands(r.newRatings) + (r.partial ? '†' : '');\n};\nconst meanCell = (r) => {\n  if (r.mean === undefined) return '—';\n  return `${r.mean.toFixed(2)} ±${r.err.toFixed(2)}` + (r.inconsistent ? '?' : '');\n};\nconst pct = (a, b) => {\n  if (a === undefined || b === undefined || b.partial || b.newRatings <= 0) return '—';\n  const p = Math.round(((a - b.newRatings) / b.newRatings) * 100);\n  return `${p >= 0 ? '+' : '−'}${Math.abs(p)}%`;\n};\nconst diff = (a, b) => {\n  if (a === undefined || b === undefined) return '—';\n  const d = a - b;\n  return `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(2)}`;\n};\nconst reviewsCell = (r) => (r.reviews.n ? `${r.reviews.n} (${(r.reviews.sum / r.reviews.n).toFixed(1)}★)` : '0');\n\nconst header = ['', 'Ratings', 'vs prev', 'Avg★ new', 'vs prev', 'Written'];\nconst lines = cur.map((r, i) => {\n  const p = prev[i];\n  return [\n    r.country,\n    ratingsCell(r),\n    pct(r.newRatings, p.noData || p.reset ? undefined : p),\n    meanCell(r),\n    diff(r.mean, p.mean),\n    reviewsCell(r),\n  ];\n});\nconst widths = header.map((h, c) => Math.max(h.length, ...lines.map((l) => l[c].length)));\nconst render = (cells) =>\n  cells.map((cell, c) => (c === 0 ? cell.padEnd(widths[c]) : cell.padStart(widths[c]))).join('   ').trimEnd();\nconst table = [render(header), ...lines.map(render)].join('\\n');\n\nconst notes = [\n  '*Avg★ new*: mean star of the ratings received this week, derived from Apple’s running totals (± is the worst-case rounding error). *Written*: reviews with text, from the review feed (Apple publishes them ~1 day late).',\n];\n// Storefronts whose collection started mid-week (e.g. newly added ones).\nconst lateStart = cur.filter((r) => r.country !== 'All' && !r.noData && r.coveredFrom > weekStart);\nif (lateStart.length) {\n  const from = Math.max(...lateStart.map((r) => r.coveredFrom));\n  const who = lateStart.length === COUNTRIES.length ? '' : ` for ${lateStart.map((r) => r.country).join(', ')}`;\n  notes.push(`† Partial week${who}: ratings counted from ${fmtTime(from)}, written reviews over the same span.`);\n} else if (cur.some((r) => r.partial && !r.noData)) {\n  notes.push('† Snapshots stop before the end of the week (collection gap).');\n}\nconst latest = COUNTRIES.filter((c) => snaps[c]?.length)\n  .map((c) => `${c} ${valueAt(snaps[c], weekEnd)?.avg.toFixed(3) ?? '—'}`)\n  .join(' · ');\nif (latest) notes.push(`All-time average at week end: ${latest}`);\n\nconst title = `Speechify iOS · App Store ratings · ${fmtDay(weekStart)} – ${fmtDay(weekEnd - DAY)}`;\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: title, emoji: true } },\n  { type: 'section', text: { type: 'mrkdwn', text: '```\\n' + table + '\\n```' } },\n  { type: 'context', elements: [{ type: 'mrkdwn', text: notes.join('\\n') }] },\n];\nconst total = cur[cur.length - 1];\nconst fallback = `${title}: ${total.noData ? 'no data' : `${thousands(total.newRatings)} new ratings, avg ${meanCell(total)}`}`;\n\nreturn [{ json: { slackBody: { text: fallback, blocks }, report: { weekStart, weekEnd, current: cur, previous: prev } } }];"
+        "jsCode": "// Weekly App Store ratings report: one Slack message for the last full week (Mon-Sun, UTC).\n// Ratings come from the hourly `ratings_snapshots` rows, written reviews from the review sheet.\n// Same logic as scripts/ratings_report.py; the README explains the maths.\nconst COUNTRIES = ['US', 'GB', 'CA', 'AU', 'BR', 'IN'];\nconst DAY = 24 * 3600 * 1000;\n// About a third of Lookup answers come from a stale edge cache (up to ~a day old), so\n// the value at a moment is the highest count seen in the 48 h before it.\nconst WINDOW = 2 * DAY;\nconst MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];\n\nlet now = new Date();\ntry {\n  const ts = $('Schedule Trigger').first().json.timestamp;\n  if (ts) now = new Date(ts);\n} catch (e) {\n  // Run without the trigger (e.g. a single node test): use the current time.\n}\n\nconst today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());\nconst weekEnd = today - ((new Date(today).getUTCDay() + 6) % 7) * DAY; // this Monday 00:00 UTC\nconst weekStart = weekEnd - 7 * DAY;\nconst prevStart = weekStart - 7 * DAY;\n\nconst num = (v) => Number(String(v ?? '').replace(/,/g, ''));\n// Shortest form of the double: Apple's raw answer prints 4.66287 as 4.66286999999...\nconst decimals = (v) => {\n  const s = String(parseFloat(v));\n  return s.includes('.') ? s.split('.')[1].length : 0;\n};\nconst parseDate = (v) => {\n  if (typeof v === 'number') return Math.round((v - 25569) * DAY); // Sheets serial date\n  const t = Date.parse(String(v ?? ''));\n  return Number.isNaN(t) ? null : t;\n};\n\nconst snaps = {};\nfor (const { json: r } of $('Read snapshots').all()) {\n  const at = Date.parse(r.snapshot_at);\n  const count = num(r.user_rating_count);\n  const avgText = String(r.average_user_rating ?? '').trim();\n  const avg = parseFloat(avgText);\n  const country = String(r.country ?? '').toUpperCase();\n  if (Number.isNaN(at) || !Number.isInteger(count) || Number.isNaN(avg) || !country) continue;\n  (snaps[country] ||= []).push({ at, count, avg, d: decimals(avgText) });\n}\nfor (const list of Object.values(snaps)) list.sort((a, b) => a.at - b.at);\n\nconst reviews = [];\nfor (const { json: r } of $('Read reviews').all()) {\n  const at = parseDate(r.date);\n  const score = Math.round(num(r.score));\n  if (at === null || !(score >= 1 && score <= 5)) continue;\n  reviews.push({ at, score, country: String(r.country ?? '').toUpperCase() });\n}\n\nfunction valueAt(list, t) {\n  let best = null;\n  let last = null;\n  for (const s of list) {\n    if (s.at > t) break;\n    last = s;\n    if (s.at > t - WINDOW && (!best || s.count >= best.count)) best = s;\n  }\n  return best || last;\n}\n\nfunction ratingStats(list, start, end) {\n  const out = { coveredFrom: start, partial: false };\n  let base = valueAt(list, start);\n  if (!base) {\n    base = list.find((s) => s.at >= start && s.at < end) || null;\n    out.partial = true;\n    if (base) out.coveredFrom = base.at;\n  }\n  const last = valueAt(list, end);\n  if (end > list[list.length - 1].at) out.partial = true;\n  if (!base || !last || !list.some((s) => s.at > start && s.at <= end)) {\n    out.noData = true;\n    return out;\n  }\n  out.newRatings = last.count - base.count;\n  out.avgEnd = last.avg;\n  if (out.newRatings < 0) {\n    out.reset = true; // a summary-rating reset or removed ratings\n    return out;\n  }\n  // Integer arithmetic in units of the average's last decimal, so N*A is exact.\n  const scale = 10 ** list.reduce((m, s) => Math.max(m, s.d), 0);\n  const a1 = Math.round(base.avg * scale);\n  const a2 = Math.round(last.avg * scale);\n  out.weighted = (last.count * a2 - base.count * a1) / scale; // N2*A2 - N1*A1\n  out.errNum = (0.5 * (base.count + last.count)) / scale;\n  if (out.newRatings > 0) {\n    out.mean = out.weighted / out.newRatings;\n    out.err = out.errNum / out.newRatings;\n    out.inconsistent = out.mean < 1 - out.err || out.mean > 5 + out.err;\n  }\n  return out;\n}\n\nfunction reviewStats(country, from, end) {\n  const rs = reviews.filter((r) => r.country === country && r.at >= from && r.at < end);\n  return { n: rs.length, sum: rs.reduce((s, r) => s + r.score, 0) };\n}\n\nfunction week(start, end) {\n  const rows = COUNTRIES.map((country) => {\n    const list = snaps[country] || [];\n    const r = list.length ? ratingStats(list, start, end) : { coveredFrom: start, noData: true };\n    return { country, ...r, reviews: reviewStats(country, r.coveredFrom, end) };\n  });\n  const total = {\n    country: 'All',\n    partial: rows.some((r) => r.partial),\n    inconsistent: rows.some((r) => r.inconsistent),\n    reviews: rows.reduce((t, r) => ({ n: t.n + r.reviews.n, sum: t.sum + r.reviews.sum }), { n: 0, sum: 0 }),\n  };\n  if (rows.every((r) => r.weighted !== undefined)) {\n    total.newRatings = rows.reduce((s, r) => s + r.newRatings, 0);\n    if (total.newRatings > 0) {\n      total.mean = rows.reduce((s, r) => s + r.weighted, 0) / total.newRatings;\n      total.err = rows.reduce((s, r) => s + r.errNum, 0) / total.newRatings;\n    }\n  } else {\n    total.noData = true;\n  }\n  return [...rows, total];\n}\n\nconst cur = week(weekStart, weekEnd);\nconst prev = week(prevStart, weekStart);\n\nconst fmtDay = (t) => `${MONTHS[new Date(t).getUTCMonth()]} ${new Date(t).getUTCDate()}`;\nconst fmtTime = (t) => `${fmtDay(t)} ${new Date(t).toISOString().slice(11, 16)} UTC`;\nconst thousands = (n) => String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');\nconst ratingsCell = (r) => {\n  if (r.noData) return 'no data';\n  if (r.reset) return 'reset?';\n  return thousands(r.newRatings) + (r.partial ? '†' : '');\n};\nconst meanCell = (r) => {\n  if (r.mean === undefined) return '—';\n  return `${r.mean.toFixed(2)} ±${r.err.toFixed(2)}` + (r.inconsistent ? '?' : '');\n};\n// Both metrics use the same completeness gate, including the aggregate row.\nfunction comparePeriods(a, b) {\n  const usable = (r) => !r.partial && !r.noData && !r.reset;\n  if (!usable(a) || !usable(b)) return { countPercent: null, meanDelta: null };\n  return {\n    countPercent: a.newRatings === undefined || !(b.newRatings > 0)\n      ? null : (a.newRatings - b.newRatings) / b.newRatings * 100,\n    meanDelta: a.mean === undefined || b.mean === undefined || a.inconsistent || b.inconsistent\n      ? null : a.mean - b.mean,\n  };\n}\nconst pct = (p) => {\n  if (p === null) return '—';\n  const rounded = Math.round(p);\n  return `${rounded >= 0 ? '+' : '−'}${Math.abs(rounded)}%`;\n};\nconst diff = (d) => d === null ? '—' : `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(2)}`;\nconst reviewsCell = (r) => (r.reviews.n ? `${r.reviews.n} (${(r.reviews.sum / r.reviews.n).toFixed(1)}★)` : '0');\n\nconst header = ['', 'Ratings', 'vs prev', 'Avg★ new', 'vs prev', 'Written'];\nconst lines = cur.map((r, i) => {\n  const p = prev[i];\n  const comparison = r.comparison = comparePeriods(r, p);\n  return [\n    r.country,\n    ratingsCell(r),\n    pct(comparison.countPercent),\n    meanCell(r),\n    diff(comparison.meanDelta),\n    reviewsCell(r),\n  ];\n});\nconst widths = header.map((h, c) => Math.max(h.length, ...lines.map((l) => l[c].length)));\nconst render = (cells) =>\n  cells.map((cell, c) => (c === 0 ? cell.padEnd(widths[c]) : cell.padStart(widths[c]))).join('   ').trimEnd();\nconst table = [render(header), ...lines.map(render)].join('\\n');\n\nconst notes = [\n  '*Avg★ new*: mean star of the ratings received this week, derived from Apple’s running totals (± is the worst-case rounding error). *Written*: reviews with text, from the review feed (Apple publishes them ~1 day late).',\n];\n// Storefronts whose collection started mid-week (e.g. newly added ones).\nconst lateStart = cur.filter((r) => r.country !== 'All' && !r.noData && r.coveredFrom > weekStart);\nif (lateStart.length) {\n  const from = Math.max(...lateStart.map((r) => r.coveredFrom));\n  const who = lateStart.length === COUNTRIES.length ? '' : ` for ${lateStart.map((r) => r.country).join(', ')}`;\n  notes.push(`† Partial week${who}: ratings counted from ${fmtTime(from)}, written reviews over the same span.`);\n} else if (cur.some((r) => r.partial && !r.noData)) {\n  notes.push('† Snapshots stop before the end of the week (collection gap).');\n}\nif (cur.some((r, i) => r.partial || prev[i].partial)) {\n  notes.push('Week-over-week comparisons are omitted whenever either week is partial.');\n}\nconst latest = COUNTRIES.filter((c) => snaps[c]?.length)\n  .map((c) => `${c} ${valueAt(snaps[c], weekEnd)?.avg.toFixed(3) ?? '—'}`)\n  .join(' · ');\nif (latest) notes.push(`All-time average at week end: ${latest}`);\n\nconst title = `Speechify iOS · App Store ratings · ${fmtDay(weekStart)} – ${fmtDay(weekEnd - DAY)}`;\nconst blocks = [\n  { type: 'header', text: { type: 'plain_text', text: title, emoji: true } },\n  { type: 'section', text: { type: 'mrkdwn', text: '```\\n' + table + '\\n```' } },\n  { type: 'context', elements: [{ type: 'mrkdwn', text: notes.join('\\n') }] },\n];\nconst total = cur[cur.length - 1];\nconst fallback = `${title}: ${total.noData ? 'no data' : `${thousands(total.newRatings)} new ratings, avg ${meanCell(total)}`}`;\n\nreturn [{ json: { slackBody: { text: fallback, blocks }, report: { weekStart, weekEnd, current: cur, previous: prev } } }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -90,29 +90,186 @@
       "name": "Build weekly report"
     },
     {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -960,
+        200
+      ],
+      "id": "6df51d67-b893-4927-aa19-f868c4bd1023",
+      "name": "Manual preview"
+    },
+    {
       "parameters": {
-        "authentication": "oAuth2",
-        "select": "channel",
-        "channelId": {
-          "__rl": true,
-          "value": "REPLACE_WITH_SLACK_CHANNEL_ID",
-          "mode": "id"
-        },
-        "messageType": "block",
-        "blocksUi": "={{ JSON.stringify({ blocks: $json.slackBody.blocks }) }}",
-        "text": "={{ $json.slackBody.text }}",
-        "otherOptions": {
-          "includeLinkToWorkflow": false
-        }
+        "jsCode": "// Leave disabled until preview, ledger setup and delivery are separately approved.\nreturn [{ json: {\n  deliveryEnabled: false,\n  channelId: 'REPLACE_WITH_SLACK_CHANNEL_ID',\n  appId: '1209815023',\n} }];\n"
       },
-      "type": "n8n-nodes-base.slack",
-      "typeVersion": 2.4,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        0
+      ],
+      "id": "79fd6605-5de7-4124-a36e-474e34d475d9",
+      "name": "Delivery settings"
+    },
+    {
+      "parameters": {
+        "jsCode": "const settings = $('Delivery settings').first().json;\nconst report = $input.first().json;\nif (settings.deliveryEnabled !== true) return [{ json: { ...report, preview: true } }];\nif (!/^[CDG][A-Z0-9]+$/.test(settings.channelId) || !/^\\d+$/.test(settings.appId)) {\n  throw new Error('Set a concrete Slack channel ID and app ID before delivery');\n}\n// Never use execution ID as the deduplication key: reruns have different IDs.\nconst key = [settings.appId, new Date(report.report.weekStart).toISOString(), settings.channelId].join(':');\nreturn [{ json: { ...report, preview: false, key, channelId: settings.channelId,\n  owner: String($execution.id), payload: { ...report.slackBody, channel: settings.channelId } } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         480,
         0
       ],
-      "id": "b15c7d9e-6f8a-4b0c-8d4e-5f6a7b8c9d15",
-      "name": "Post to Slack"
+      "id": "f841077a-e693-4bc8-b5e5-97cb65812359",
+      "name": "Prepare delivery"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "316ad389-4309-4d86-a541-20cfbb016805",
+              "leftValue": "={{ $json.preview }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        0
+      ],
+      "id": "c434f24a-6867-491b-92a1-5e02a9cd9203",
+      "name": "Delivery enabled?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO weekly_ratings_delivery AS ledger (report_key, owner, state, payload)\nVALUES ($1, $2, 'sending', $3::jsonb)\nON CONFLICT (report_key) DO UPDATE\nSET owner = EXCLUDED.owner, state = 'sending', payload = EXCLUDED.payload,\n    slack_ts = NULL, detail = NULL, updated_at = now()\nWHERE ledger.state = 'failed'\nRETURNING report_key, owner, state;",
+        "options": {
+          "queryReplacement": "={{ [$json.key, $json.owner, JSON.stringify($json.payload)] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        960,
+        -100
+      ],
+      "id": "90340d49-c088-4ec9-b7b3-ade98463b46b",
+      "name": "Claim delivery",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const delivery = $('Prepare delivery').first().json;\nconst claims = $input.all();\nif (delivery.preview || claims.length !== 1) return [];\nconst claim = claims[0].json;\nif (claim.report_key !== delivery.key || claim.owner !== delivery.owner || claim.state !== 'sending') return [];\nreturn [{ json: delivery }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        -100
+      ],
+      "id": "6e20b0de-70e3-4131-ab16-9273b9a85121",
+      "name": "Build guarded request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/chat.postMessage",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {
+          "timeout": 30000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        -100
+      ],
+      "id": "b9821762-a48e-432c-8274-8c207c215e94",
+      "name": "Post to Slack",
+      "retryOnFail": false,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const delivery = $('Build guarded request').first().json;\nconst response = $input.first().json;\nconst body = response.body;\n// Only explicit, documented rejections are safe to retry. Unknown/internal errors\n// and transport failures may follow a successful post and must remain blocked.\nconst rejected = new Set(['channel_not_found', 'not_in_channel', 'is_archived',\n  'invalid_auth', 'not_authed', 'token_revoked', 'account_inactive',\n  'missing_scope', 'no_permission', 'invalid_blocks', 'invalid_arguments',\n  'msg_too_long', 'no_text', 'restricted_action', 'rate_limited', 'ratelimited']);\nlet state = 'ambiguous';\nlet ts = null;\nlet detail = 'Unconfirmed send; reconcile before retry';\nif (response.statusCode === 200 && body?.ok === true &&\n    body.channel === delivery.channelId && typeof body.ts === 'string' && /^\\d+\\.\\d+$/.test(body.ts)) {\n  state = 'sent'; ts = body.ts; detail = null;\n} else if (response.statusCode >= 200 && response.statusCode < 500 &&\n           body?.ok === false && rejected.has(body.error)) {\n  state = 'failed'; detail = body.error;\n}\nreturn [{ json: { key: delivery.key, owner: delivery.owner, state, ts, detail } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        -100
+      ],
+      "id": "d0275f17-ea7c-443b-80bf-2ec4ba8310a1",
+      "name": "Classify delivery result"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE weekly_ratings_delivery\nSET state = $3, slack_ts = $4, detail = $5, updated_at = now()\nWHERE report_key = $1 AND owner = $2 AND state = 'sending'\nRETURNING report_key, state, slack_ts;",
+        "options": {
+          "queryReplacement": "={{ [$json.key, $json.owner, $json.state, $json.ts, $json.detail] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1920,
+        -100
+      ],
+      "id": "20d092df-2fc7-428b-94bf-15a528edc961",
+      "name": "Persist delivery result",
+      "retryOnFail": false
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all();\nif (rows.length !== 1 || rows[0].json.state !== 'sent') {\n  throw new Error('Delivery not confirmed. Inspect the ledger and execution before retrying.');\n}\nreturn rows;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        -100
+      ],
+      "id": "1f6b4303-37ff-46a5-aadf-8f1d1e05fe2c",
+      "name": "Check delivery result"
     }
   ],
   "connections": {
@@ -120,7 +277,7 @@
       "main": [
         [
           {
-            "node": "Read snapshots",
+            "node": "Delivery settings",
             "type": "main",
             "index": 0
           }
@@ -153,7 +310,106 @@
       "main": [
         [
           {
+            "node": "Prepare delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual preview": {
+      "main": [
+        [
+          {
+            "node": "Delivery settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delivery settings": {
+      "main": [
+        [
+          {
+            "node": "Read snapshots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare delivery": {
+      "main": [
+        [
+          {
+            "node": "Delivery enabled?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delivery enabled?": {
+      "main": [
+        [
+          {
+            "node": "Claim delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim delivery": {
+      "main": [
+        [
+          {
+            "node": "Build guarded request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build guarded request": {
+      "main": [
+        [
+          {
             "node": "Post to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Slack": {
+      "main": [
+        [
+          {
+            "node": "Classify delivery result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify delivery result": {
+      "main": [
+        [
+          {
+            "node": "Persist delivery result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist delivery result": {
+      "main": [
+        [
+          {
+            "node": "Check delivery result",
             "type": "main",
             "index": 0
           }

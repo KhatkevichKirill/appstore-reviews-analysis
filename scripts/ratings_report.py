@@ -274,6 +274,26 @@ def _combine(start: datetime, rows: list[PeriodStats]) -> PeriodStats:
     return combined
 
 
+def compare_periods(current: PeriodStats, previous: PeriodStats) -> dict:
+    """Shared weekly-report rule: both periods must be complete and usable.
+
+    Applies equally to storefront and ALL rows. The CLI has no comparison
+    columns; this helper is the reference used by the n8n parity tests.
+    """
+    empty = {"countPercent": None, "meanDelta": None}
+    invalid = {"partial", "no_data", "count_decreased"}
+    if invalid.intersection(current.flags) or invalid.intersection(previous.flags):
+        return empty
+    count = None
+    if current.new_ratings is not None and previous.new_ratings is not None and previous.new_ratings > 0:
+        count = Decimal(current.new_ratings - previous.new_ratings) / previous.new_ratings * 100
+    mean = None
+    if (current.new_average is not None and previous.new_average is not None
+            and "inconsistent" not in current.flags and "inconsistent" not in previous.flags):
+        mean = current.new_average - previous.new_average
+    return {"countPercent": count, "meanDelta": mean}
+
+
 def compute(
     snapshots: Sequence[Snapshot],
     reviews: Sequence[Review],
