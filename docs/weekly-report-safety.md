@@ -152,11 +152,17 @@ graph compatibility, **not** a live runtime concurrency test or an exact server
 release identification. Repository update behavior was checked against current
 upstream source; local SQLite tests model it rather than running the n8n service.
 
-No live workflow/table was created, imported, executed or changed; no Slack post
-or production data write was made. Before activation, exercise the claim and
-completion path in an isolated n8n environment with a disposable table and mocked
-Slack, including two manual runs and manual/scheduled overlap. If that version
-cannot enforce the conditional update as modeled, keep delivery disabled.
+Subsequent explicitly authorized tests on 2026-10-13 created one isolated workflow
+and one isolated Data Table on the connected n8n instance. The exported claim,
+request guard, classification and persistence Code nodes were used unchanged,
+with synthetic reports and persistent mock Slack receipts. Four conditional
+updates overlapped and only one sent. Repeats, definite failure and retry,
+uncertainty, interruption after a mock send, and scoped recovery all passed.
+See the [runtime evidence and limitations](isolated-n8n-validation.md).
+The fixture is inactive, unpublished and defaults to observation. No production
+workflow/table was changed and no real Slack message was sent. Manual/scheduled
+trigger overlap, physical server restart and real Slack remain untested;
+production activation still requires separate approval.
 
 References: [Data Tables](https://docs.n8n.io/data/data-tables/),
 [Data Table Update](https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.datatable/rows/),
