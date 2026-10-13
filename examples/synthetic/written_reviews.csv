@@ -1,0 +1,7 @@
+id,date,country,score,title,content
+demo-1,2026-10-09T12:00:00Z,US,4,Fictional demo review,Synthetic example; not a customer review.
+demo-2,2026-10-09T12:00:00Z,GB,4,Fictional demo review,Synthetic example; not a customer review.
+demo-3,2026-10-09T12:00:00Z,CA,4,Fictional demo review,Synthetic example; not a customer review.
+demo-4,2026-10-09T12:00:00Z,AU,4,Fictional demo review,Synthetic example; not a customer review.
+demo-5,2026-10-09T12:00:00Z,BR,4,Fictional demo review,Synthetic example; not a customer review.
+demo-6,2026-10-09T12:00:00Z,IN,4,Fictional demo review,Synthetic example; not a customer review.

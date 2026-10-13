@@ -1,5 +1,12 @@
 # appstore-reviews-analysis
 
+**Start here:** [launch guide for your own app](docs/quickstart.md) ·
+[public synthetic Google Sheet](https://docs.google.com/spreadsheets/d/1_tkPAO0I9o1VIxYZCRpid_KEnWc5xzF5TRoMq9rkQTc/edit) ·
+[fictional example data](examples/synthetic/).
+
+Released under the [MIT License](LICENSE). [Publication copy](docs/publication.md)
+includes Telegram and LinkedIn drafts and the public demo link.
+
 Tooling for the Speechify iOS app's App Store feedback: the existing written-review
 feed, plus rating counts that include ratings left **without** a review.
 
@@ -8,9 +15,10 @@ Tracking issue: [AICP-172](https://linear.app/speechify-inc/issue/AICP-172/repor
 ## The constraint everything here works around
 
 Apple publishes **written reviews** individually (the public customer-reviews RSS
-feed, App Store Connect `customerReviews`), but a **star-only rating** never appears
-as a record anywhere. A review scraper therefore cannot count ratings, however it is
-configured. What *is* public, per storefront, is the running aggregate from the iTunes
+feed, App Store Connect `customerReviews`), while the public Lookup API exposes
+star-only ratings through cumulative aggregates. Counting written reviews therefore
+does not count all ratings. What is public, per storefront, is the running aggregate
+from the iTunes
 Lookup API (`https://itunes.apple.com/lookup?id=1209815023&country=us`):
 
 - `userRatingCount`: total ratings so far
@@ -28,8 +36,8 @@ From two snapshots *(N1, A1)* and *(N2, A2)*:
 | worst-case error of that mean | e·(N1 + N2) / (N2 − N1), where e = half a unit in the last decimal of the average |
 
 The error term is the catch: everything depends on how many decimals Apple returns.
-Apple returns 5, which keeps a weekly mean within about ±0.02★ in every storefront
-(see the findings below).
+Our dated observations below found 5 decimals. The bound depends on the actual
+response and period; ±0.02★ is not a general accuracy guarantee.
 
 There is **no 1★–5★ split** in this data. Getting one needs another source (the
 customer-reviews histogram endpoint, App Store Connect, or a paid tracker); see
@@ -201,9 +209,11 @@ Flags:
   new ratings is around 4.2–4.4★ overall (US-dominated). Written reviews alone overstate
   the bad news.
 
-## Still to verify (AICP-172)
+## Validation and remaining questions
 
 - Whether a summary-rating reset on a version release affects `userRatingCount` (the
   `count_decreased` flag will show it).
-- The weekly workflow's first manual run in n8n: how the Sheets node returns numbers
-  and dates (the code accepts strings, numbers and Sheets serial dates).
+- Completed 2026-10-13: Sheets-backed previews, isolated concurrent/repeat runs,
+  and a real test-channel Slack send followed by a suppressed repeat. See the
+  [validation record](docs/isolated-n8n-validation.md); repeat environment-dependent
+  checks when importing into a different n8n instance.
